@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sidecar-search"
+version = "0.0.0"
+authors = [
+	{name = "Kenny Peng", email = "knypng44@gmail.com"}
+]
+description = "Build tools for sidecar indicies to add semantic search to anything"
+classifiers = [
+	"Development Status :: 1 - Planning",
+	"Intended Audience :: Developers",
+	"Intended Audience :: Science/Research",
+	"Operating System :: POSIX :: Linux",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3 :: Only",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Programming Language :: Python :: 3.14",
+	"Topic :: Scientific/Engineering :: Artificial Intelligence",
+	"Typing :: Typed",
+]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+	"torch~=2.6",
+	"filelock",
+	"sentence-transformers~=3.4",
+	"tqdm",
+	"numpy>=1.26.4",
+	"pyarrow>=19.0.0",
+	# Disabled due to faiss-gpu not being available on PyPI
+	# "faiss-gpu~=1.9.0",
+	"datasets>=3.3.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/colonelwatch/sidecar-search"
+Repository = "https://github.com/colonelwatch/sidecar-search.git"
+Issues = "https://github.com/colonelwatch/sidecar-search/issues"
+
+[project.scripts]
+sidecar-search-table = "sidecar_search.utils.table_utils:main"
+sidecar-search-build = "sidecar_search.build:main"
+sidecar-search-dump = "sidecar_search.dump:main"
+sidecar-search-index = "sidecar_search.index:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sidecar_search*"]
+exclude = []
+namespaces = false

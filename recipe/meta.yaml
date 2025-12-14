@@ -1,0 +1,52 @@
+package:
+  name: sidecar-search
+  version: "0.1.0"
+
+source:
+  path: ../
+
+build:
+  script: pip install . -vv
+  entry_points:
+    - sidecar-search-table = sidecar_search.utils.table_utils:main
+    - sidecar-search-build = sidecar_search.build:main
+    - sidecar-search-dump = sidecar_search.dump:main
+    - sidecar-search-index = sidecar_search.index:main
+
+requirements:
+  build:
+    - git
+  host:
+    - python
+    - pip
+    - setuptools >=77.0.3
+  run:
+    - python
+    - pytorch ~=2.6
+    - filelock
+    - sentence-transformers ~=3.4
+    - tqdm
+    - numpy >=1.26.4
+    - pyarrow
+    - faiss-gpu ~=1.9.0
+    - datasets >=3.3.2
+
+test:
+  imports:
+    - sidecar_search
+  requires:
+    - pip
+  commands:
+    - pip check
+    - sidecar-search-table --help
+    - sidecar-search-build --help
+    - sidecar-search-dump --help
+    - sidecar-search-index --help
+
+about:
+  home: https://github.com/colonelwatch/sidecar-search
+  license: Apache-2.0
+  license_file: LICENSE
+  summary: |
+    Build tools for sidecar indices to add sematic search to anything
+  dev_url: https://github.com/colonelwatch/sidecar-search
