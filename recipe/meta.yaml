@@ -6,7 +6,8 @@ source:
   path: ../
 
 build:
-  script: pip install . -vv
+  noarch: python
+  script: pip install . -vv --no-deps --no-build-isolation
   entry_points:
     - sidecar-search-table = sidecar_search.utils.table_utils:main
     - sidecar-search-build = sidecar_search.build:main
@@ -15,8 +16,6 @@ build:
 
 requirements:
   build:
-    - git
-  host:
     - python
     - pip
     - setuptools >=77.0.3
