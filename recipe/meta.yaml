@@ -1,6 +1,6 @@
 package:
   name: sidecar-search
-  version: "0.1.0"
+  version: "0.0.0"
 
 source:
   path: ../
@@ -38,9 +38,9 @@ test:
   commands:
     - pip check
     - sidecar-search-table --help
-    - sidecar-search-build --help
-    - sidecar-search-dump --help
-    - sidecar-search-index --help
+    - sidecar-search build --help
+    - sidecar-search dump --help
+    - sidecar-search index --help
 
 about:
   home: https://github.com/colonelwatch/sidecar-search
