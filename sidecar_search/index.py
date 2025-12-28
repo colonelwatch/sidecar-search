@@ -36,6 +36,8 @@ from typing import (
     TypedDict,
     Unpack,
     assert_never,
+    cast,
+    get_args,
 )
 
 import faiss  # many monkey-patches, see faiss/python/class_wrappers.py in faiss repo
@@ -47,6 +49,8 @@ from datasets.fingerprint import Hasher
 from faiss.contrib.ondisk import merge_ondisk
 from tqdm import tqdm
 
+from .args import SharedArgsMixin
+from .args_base import CommandGroupArgsBase, SubcommandArgsBase
 from .utils.cache_utils import (
     clean_hf_cache,
     clean_persistent_cache,
@@ -79,26 +83,22 @@ class Params(TypedDict):
 
 
 @dataclass
-class Args:
+class IndexSharedArgsMixin(SharedArgsMixin):
     build_dir: Path
-    progress: bool
     use_cache: bool  # for experiments only
 
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
+        parser.add_argument("-B", "--build-dir", default=Path("."), type=Path)
+        parser.add_argument("--use-cache", action="store_true")
+
+    # TODO: rethink __post_init__ inheritance
     def __post_init__(self) -> None:
         if self.build_dir.exists() and not self.build_dir.is_dir():
             raise ValueError(
                 f'build dir "{self.build_dir}" exists but is not a directory'
             )
-
-    @classmethod
-    def from_namespace(cls, namespace: Namespace) -> Self:
-        return cls(**vars(namespace))
-
-    @staticmethod
-    def configure_parser(parser: ArgumentParser) -> None:
-        parser.add_argument("-B", "--build-dir", default=Path("."), type=Path)
-        parser.add_argument("-P", "--progress", action="store_true")
-        parser.add_argument("--use-cache", action="store_true")
 
     @property
     def empty_index_path(self) -> Path:
@@ -122,25 +122,27 @@ class Args:
 
 
 @dataclass
-class CleanArgs(Args):
-    mode: Literal["clean"]
+class IndexCleanArgs(
+    IndexSharedArgsMixin, SubcommandArgsBase[Literal["index"], Literal["clean"]]
+):
     source: Path | None
 
-    @staticmethod
-    def configure_parser(parser: ArgumentParser) -> None:
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
         parser.add_argument("-s", "--source", default=None, type=Path)
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        assert self.mode == "clean", f'expected clean mode, got "{self.mode}"'
-
         if self.source is not None and not self.source.exists():
             raise ValueError(f'source at "{self.source}" does not exist')
 
 
+# TODO: make a mixin for source, distinct from clean command
 @dataclass
-class TrainArgs(Args):
-    mode: Literal["train"]
+class IndexTrainArgs(
+    IndexSharedArgsMixin, SubcommandArgsBase[Literal["index"], Literal["train"]]
+):
     source: Path
     dimensions: int | None  # matryoshka
     normalize: bool  # also if normalize_d_
@@ -151,8 +153,9 @@ class TrainArgs(Args):
     ivf_encoding: str = field(init=False, compare=False)
     encoding_width: int = field(init=False, compare=False)
 
-    @staticmethod
-    def configure_parser(parser: ArgumentParser) -> None:
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
         parser.add_argument("source", type=Path)
         parser.add_argument("-d", "--dimensions", default=None, type=int)
         parser.add_argument("-N", "--normalize", action="store_true")
@@ -161,7 +164,6 @@ class TrainArgs(Args):
 
     def __post_init__(self):
         super().__post_init__()
-        assert self.mode == "train", f'expected train mode, got "{self.mode}"'
 
         if not self.source.exists():
             raise ValueError(f'source path "{self.source}" does not exist')
@@ -183,8 +185,9 @@ class TrainArgs(Args):
 
 
 @dataclass
-class TuneArgs(Args):
-    mode: Literal["tune"]
+class IndexTuneArgs(
+    IndexSharedArgsMixin, SubcommandArgsBase[Literal["index"], Literal["tune"]]
+):
     source: Path
     intersection: int | None  # 1R@1 else kR@k
     queries: int
@@ -195,15 +198,14 @@ class TuneArgs(Args):
     dimensions: int | None = field(init=False, compare=False)
     normalize: bool = field(init=False, compare=False)
 
-    @staticmethod
-    def configure_parser(parser: ArgumentParser) -> None:
-        parser.add_argument("source", type=Path)
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
         parser.add_argument("-k", "--intersection", default=None, type=int)
         parser.add_argument("-q", "--queries", default=8192, type=int)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
-        assert self.mode == "tune", f'expected tune mode, got "{self.mode}"'
 
         if not self.source.exists():
             raise ValueError(f'source path "{self.source}" does not exist')
@@ -228,21 +230,22 @@ class TuneArgs(Args):
 
 
 @dataclass
-class FillArgs(Args):
-    mode: Literal["fill"]
+class IndexFillArgs(
+    IndexSharedArgsMixin, SubcommandArgsBase[Literal["index"], Literal["fill"]]
+):
     source: Path
 
     # not args
     dimensions: int | None = field(init=False, compare=False)
     normalize: bool = field(init=False, compare=False)
 
-    @staticmethod
-    def configure_parser(parser: ArgumentParser) -> None:
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
         parser.add_argument("source", type=Path)
 
     def __post_init__(self):
         super().__post_init__()
-        assert self.mode == "fill", f'expected fill mode, got "{self.mode}"'
 
         if not self.source.exists():
             raise ValueError(f'source path "{self.source}" does not exist')
@@ -259,15 +262,19 @@ class FillArgs(Args):
         self.normalize = params["normalize"]
 
 
-def parse_args() -> Namespace:
-    parser = ArgumentParser("index.py", "Trains or fills the FAISS index.")
-    Args.configure_parser(parser)
-    subparsers = parser.add_subparsers(dest="mode", required=True)
-    CleanArgs.configure_parser(subparsers.add_parser("clean"))
-    TrainArgs.configure_parser(subparsers.add_parser("train"))
-    TuneArgs.configure_parser(subparsers.add_parser("tune"))
-    FillArgs.configure_parser(subparsers.add_parser("fill"))
-    return parser.parse_args()
+AllIndexSubcommandArgs = IndexCleanArgs | IndexTrainArgs | IndexTuneArgs | IndexFillArgs
+
+ALL_INDEX_SUBCOMMAND_ARGS = cast(
+    tuple[type[AllIndexSubcommandArgs], ...], get_args(AllIndexSubcommandArgs)
+)
+
+
+@dataclass
+class IndexGroupArgs(IndexSharedArgsMixin, CommandGroupArgsBase[Literal["index"]]):
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
+        cls._add_subcommands(parser, ALL_INDEX_SUBCOMMAND_ARGS)
 
 
 @contextmanager
@@ -470,7 +477,9 @@ class GroundTruthProvisioner(Provisioner[Dataset]):
         super().__init__(**kwargs)
 
     @classmethod
-    def with_tune_args(cls, dataset: Dataset, queries: Dataset, args: TuneArgs) -> Self:
+    def with_tune_args(
+        cls, dataset: Dataset, queries: Dataset, args: IndexTuneArgs
+    ) -> Self:
         # for unit vectors, the L2 minimizing is also the inner-product maximizing
         return cls(
             dataset=dataset,
@@ -554,7 +563,7 @@ class MemmapProvisioner(Provisioner[NDMemmap[np.float32]]):
         self._shape = kwargs["shape"]
 
     @classmethod
-    def with_train_args(cls, dataset: Dataset, args: TrainArgs) -> Self:
+    def with_train_args(cls, dataset: Dataset, args: IndexTrainArgs) -> Self:
         n = len(dataset)
         d = args.dimensions
         if d is None:
@@ -584,7 +593,9 @@ def to_cpu(index: faiss.Index) -> faiss.Index:
     return faiss.index_gpu_to_cpu(index)
 
 
-def train_index(train: Dataset, factory_string: str, args: TrainArgs) -> faiss.Index:
+def train_index(
+    train: Dataset, factory_string: str, args: IndexTrainArgs
+) -> faiss.Index:
     provisioner = MemmapProvisioner.with_train_args(train, args)
     train_memmap = provisioner.provision(progress=args.progress)
 
@@ -720,7 +731,7 @@ class MakeIndexProvisioner(Provisioner[MakeIndexOutput]):
         cls,
         dataset: Dataset,
         holdouts: torch.Tensor | None,
-        args: FillArgs | TuneArgs,
+        args: IndexFillArgs | IndexTuneArgs,
     ) -> Self:
         d = args.dimensions
         if d is None:
@@ -750,7 +761,7 @@ class MakeIndexProvisioner(Provisioner[MakeIndexOutput]):
 
 
 def tune_index(
-    filled_index: faiss.Index, ground_truth: Dataset, args: TuneArgs
+    filled_index: faiss.Index, ground_truth: Dataset, args: IndexTuneArgs
 ) -> list[IndexParameters]:
     with ground_truth.formatted_as("numpy"):
         q: npt.NDArray[np.float32] = ground_truth["embedding"]  # type: ignore
@@ -807,7 +818,7 @@ def save_params(
         json.dump(params, f, indent=4)
 
 
-def ensure_trained(dataset: Dataset, args: TrainArgs):
+def ensure_trained(dataset: Dataset, args: IndexTrainArgs):
     if args.clusters is None:
         clusters = len(dataset) // TRAIN_SIZE_MULTIPLE
     else:
@@ -824,7 +835,7 @@ def ensure_trained(dataset: Dataset, args: TrainArgs):
         save_params(args.untuned_params_path, args.dimensions, args.normalize, None)
 
 
-def ensure_tuned(dataset: Dataset, args: TuneArgs) -> None:
+def ensure_tuned(dataset: Dataset, args: IndexTuneArgs) -> None:
     # the queries is to be held out from the making of a provisional index
     queries = dataset.shuffle(seed=42).skip(len(dataset) - args.queries)
 
@@ -843,7 +854,7 @@ def ensure_tuned(dataset: Dataset, args: TuneArgs) -> None:
         save_params(args.params_path, args.dimensions, args.normalize, optimal_params)
 
 
-def ensure_filled(dataset: Dataset, args: FillArgs) -> None:
+def ensure_filled(dataset: Dataset, args: IndexFillArgs) -> None:
     provisioner = MakeIndexProvisioner.with_args(dataset, None, args)
     output = provisioner.provision(progress=args.progress)
 
@@ -855,26 +866,8 @@ def ensure_filled(dataset: Dataset, args: FillArgs) -> None:
         copy(output.ondisk_path, ondisk_path)
 
 
-def main():
-    args = parse_args()
-
-    try:
-        match args.mode:
-            case "clean":
-                args = CleanArgs.from_namespace(args)
-            case "train":
-                args = TrainArgs.from_namespace(args)
-            case "tune":
-                args = TuneArgs.from_namespace(args)
-            case "fill":
-                args = FillArgs.from_namespace(args)
-            case _ as mode:
-                assert_never(mode)
-    except ValueError as e:
-        print("error:", e.args[0], file=stderr)
-        return 1
-
-    if args.mode == "clean":
+def index_main(args: AllIndexSubcommandArgs):
+    if args.subcommand == "clean":
         clean_persistent_cache()
         if args.source:
             # NOTE: if the cache wasn't created, this will create then delete the cache
@@ -894,7 +887,8 @@ def main():
     if not args.build_dir.exists():
         args.build_dir.mkdir()
 
-    match args.mode:
+    # TODO: make these functions return int, and rename them to "main" funcs?
+    match args.subcommand:
         case "train":
             ensure_trained(dataset, args)
         case "tune":
@@ -904,6 +898,4 @@ def main():
         case _ as mode:
             assert_never(mode)
 
-
-if __name__ == "__main__":
-    exit(main())
+    return 0

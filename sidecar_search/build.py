@@ -18,19 +18,22 @@ import json
 import queue
 import sqlite3
 import sys
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from subprocess import PIPE, Popen
 from threading import Event, Thread
-from typing import Generator, Iterable, Self, TextIO, cast
+from typing import Generator, Iterable, Literal, Self, TextIO, cast
 
 import torch
 from filelock import FileLock
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
+from .args import SharedArgsMixin
+from .args_base import CommandArgsBase
 from .utils.env_utils import BF16, MODEL, TRUST_REMOTE_CODE
 from .utils.gpu_utils import imap, iunsqueeze, iunzip
 from .utils.table_utils import insert_embeddings, to_sql_binary
@@ -38,16 +41,26 @@ from .utils.table_utils import insert_embeddings, to_sql_binary
 DocumentIdBatch = tuple[list[str], list[str]]
 
 
-def parse_args() -> Namespace:
-    parser = ArgumentParser("build.py", description="Embeds titles and abstracts.")
-    parser.add_argument("data_path", type=Path)
-    parser.add_argument("-t", "--tasks", default=2, type=int)
-    parser.add_argument("-b", "--batch-size", default=256, type=int)
-    parser.add_argument("--filter-tasks", default=5, type=int)
-    parser.add_argument("--filter-batch-size", default=1024, type=int)
-    parser.add_argument("-P", "--progress", action="store_true")
-    args = parser.parse_args()
-    return args
+@dataclass
+class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
+    data_path: Path
+    tasks: int
+    batch_size: int
+    filter_tasks: int
+    filter_batch_size: int
+
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
+
+        parser.prog = "build"
+        parser.description = "Embeds titles and abstracts."
+
+        parser.add_argument("data_path", type=Path)
+        parser.add_argument("-t", "--tasks", default=2, type=int)
+        parser.add_argument("-b", "--batch-size", default=256, type=int)
+        parser.add_argument("--filter-tasks", default=5, type=int)
+        parser.add_argument("--filter-batch-size", default=1024, type=int)
 
 
 def get_model(
@@ -285,9 +298,7 @@ def encode_pipelined(
         yield ids_batch, embeddings_batch
 
 
-def main():
-    args = parse_args()
-
+def build_main(args: BuildArgs) -> int:
     # Get model with file lock to ensure next process will see this one
     with FileLock("/tmp/abstracts-search-gpu.lock"):
         model = get_model(MODEL, BF16, TRUST_REMOTE_CODE)
@@ -311,6 +322,4 @@ def main():
         for ids_batch, embeddings_batch in batches:
             conn.insert_async(ids_batch, embeddings_batch)
 
-
-if __name__ == "__main__":
-    main()
+    return 0

@@ -45,9 +45,7 @@ Issues = "https://github.com/colonelwatch/sidecar-search/issues"
 
 [project.scripts]
 sidecar-search-table = "sidecar_search.utils.table_utils:main"
-sidecar-search-build = "sidecar_search.build:main"
-sidecar-search-dump = "sidecar_search.dump:main"
-sidecar-search-index = "sidecar_search.index:main"
+sidecar-search = "sidecar_search.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

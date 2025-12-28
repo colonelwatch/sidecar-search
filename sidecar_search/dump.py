@@ -16,6 +16,7 @@
 
 import sqlite3
 from argparse import ArgumentParser, Namespace
+from dataclasses import dataclass
 from pathlib import Path
 from shutil import rmtree
 from sys import stderr
@@ -28,6 +29,8 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import torch
 
+from .args import SharedArgsMixin
+from .args_base import CommandArgsBase
 from .utils.env_utils import BF16
 from .utils.table_utils import (
     VectorConverter,
@@ -36,6 +39,32 @@ from .utils.table_utils import (
     query_bf16,
     to_sql_binary,
 )
+
+
+@dataclass
+class DumpArgs(SharedArgsMixin, CommandArgsBase[Literal["dump"]]):
+    source: Path
+    dest: Path
+    batch_size: int
+    shard_size: int
+    row_group_size: int
+    enforce_dtype: bool
+
+    @classmethod
+    def configure_parser(cls, parser: ArgumentParser) -> None:
+        super().configure_parser(parser)
+        parser.add_argument("source", type=Path)
+        parser.add_argument("dest", type=Path)
+        parser.add_argument("-b", "--batch-size", default=1024, type=int)
+        parser.add_argument(
+            "-s", "--shard-size", default=4194304, type=int
+        )  # under 4GB
+        parser.add_argument(
+            "--row-group-size", default=262144, type=int
+        )  # around 128MB
+        parser.add_argument(
+            "--no-enforce-dtype", action="store_false", dest="enforce_dtype"
+        )
 
 
 def parse_args() -> Namespace:
@@ -198,15 +227,13 @@ def dump_dataset(
             insert_embeddings(batch["id"].to_pylist(), embeddings, conn)
 
 
-def main() -> int:
-    args = parse_args()
-
-    source: Path = args.source
+def dump_main(args: DumpArgs) -> int:
+    source = args.source
     if not source.exists():
         print(f'error: source path "{source}" does not exist', file=stderr)
         return 1
 
-    dest: Path = args.dest
+    dest = args.dest
     if dest.exists():
         print(f'error: destination path "{dest}" exists', file=stderr)
         return 1
@@ -234,8 +261,3 @@ def main() -> int:
         return 1
 
     return 0
-
-
-if __name__ == "__main__":
-    ret = main()
-    exit(ret)
