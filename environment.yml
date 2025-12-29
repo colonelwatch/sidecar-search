@@ -1,0 +1,13 @@
+name: sidecar-search-dev
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - pytorch~=2.6
+  - filelock
+  - sentence-transformers~=3.4
+  - tqdm
+  - numpy>=1.26.4
+  - pyarrow
+  - faiss-gpu~=1.9.0
+  - datasets>=3.3.2
