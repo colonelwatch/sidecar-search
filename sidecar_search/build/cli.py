@@ -37,7 +37,6 @@ class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
     def configure_parser(cls, parser: ArgumentParser) -> None:
         super().configure_parser(parser)
 
-        parser.prog = "build"
         parser.description = "Embeds titles and abstracts."
 
         parser.add_argument("data_path", type=Path)
