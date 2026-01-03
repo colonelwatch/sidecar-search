@@ -41,6 +41,8 @@ def imap[T, U_contra](
     inputs: Iterable[tuple[U_contra]],
     func: Callable[[U_contra], T],
     n_tasks: int,
+    *,
+    prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
 
 
@@ -49,6 +51,8 @@ def imap[T, U_contra, V_contra](
     inputs: Iterable[tuple[U_contra, V_contra]],
     func: Callable[[U_contra, V_contra], T],
     n_tasks: int,
+    *,
+    prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
 
 
@@ -57,13 +61,17 @@ def imap[T, U_contra, V_contra, W_contra](
     inputs: Iterable[tuple[U_contra, V_contra, W_contra]],
     func: Callable[[U_contra, V_contra, W_contra], T],
     n_tasks: int,
+    *,
+    prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
 
 
 def imap[T](
     inputs: Iterable[tuple],
     func: Callable[..., T],
-    n_tasks: int,
+    n_tasks: int,  # TODO: rename to n_workers
+    *,
+    prefetch_factor: int = 2,
 ) -> Generator[T, None, None]:
     if n_tasks == 0:
         for data_in in inputs:
@@ -73,10 +81,11 @@ def imap[T](
         n_tasks = os.cpu_count() or 1
 
     tasks = deque[Future[T]]()
+    n_max_pending = n_tasks * prefetch_factor
     with ThreadPoolExecutor(n_tasks) as executor:
         for data_in in inputs:
             # clear out the task queue of completed tasks, then wait until there's room
-            while (tasks and tasks[0].done()) or len(tasks) > n_tasks:
+            while (tasks and tasks[0].done()) or len(tasks) > n_max_pending:
                 yield tasks.popleft().result()
 
             task = executor.submit(func, *data_in)

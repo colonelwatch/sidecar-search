@@ -6,10 +6,11 @@ from argparse import ArgumentParser
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from itertools import batched
 from pathlib import Path
 from subprocess import PIPE, Popen
 from threading import Event, Thread
-from typing import Generator, Iterable, Literal, Self, TextIO, cast
+from typing import BinaryIO, Generator, Iterable, Literal, Self, cast
 
 import torch
 from filelock import FileLock
@@ -88,56 +89,20 @@ def get_model(
     return model
 
 
-class OaJsonlBatched:
-    def __init__(self, batch_size: int) -> None:
-        self._batch_size = batch_size
-        self._worker = Thread(target=self._load_routine)
-        self._queue: queue.Queue[DocumentIdBatch | None] = queue.Queue(3)
-        self._halt = Event()
+def _process_lines_batch(batch: Iterable[bytes]) -> DocumentIdBatch:
+    ids: list[str] = []
+    documents: list[str] = []
+    for line in batch:
+        row = json.loads(line)
+        ids.append(row["id"])
+        documents.append(row["document"])
+    return ids, documents
 
-    def start(self) -> None:
-        self._worker.start()
 
-    def stop(self) -> None:
-        self._halt.set()
-        self._worker.join()
-
-    def __enter__(self) -> Self:
-        self.start()
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
-        self.stop()
-
-    def __iter__(self) -> Generator[DocumentIdBatch, None, None]:
-        while True:
-            batch = self._queue.get()
-            if batch is None:
-                break
-            yield batch
-
-    def _load_routine(self):
-        stdin_cast = cast(TextIO, sys.stdin)
-
-        ids_batch: list[str] = []
-        documents_batch: list[str] = []
-        for line in stdin_cast.buffer:
-            row = json.loads(line)
-
-            ids_batch.append(row["id"])
-            documents_batch.append(row["document"])
-            if len(documents_batch) >= self._batch_size:
-                self._queue.put((ids_batch, documents_batch))
-                ids_batch = []
-                documents_batch = []
-
-            if self._halt.is_set():
-                return
-
-        if documents_batch:
-            self._queue.put((ids_batch, documents_batch))
-
-        self._queue.put(None)
+def iter_documents(batch_size: int) -> Iterable[DocumentIdBatch]:
+    stdin_cast = cast(BinaryIO, sys.stdin.buffer)
+    inputs = iunsqueeze(batched(stdin_cast, batch_size))
+    return imap(inputs, _process_lines_batch, 1, prefetch_factor=3)
 
 
 class SharedConnection:
@@ -288,12 +253,10 @@ def build_main(args: BuildArgs) -> int:
         exit(1)
 
     sqlite3.register_adapter(torch.Tensor, to_sql_binary)
-    with (
-        OaJsonlBatched(args.filter_batch_size) as batches,
-        SharedConnection(args.data_path) as conn,
-    ):
+    with SharedConnection(args.data_path) as conn:
         parallel_filter = ParallelFilter(conn, args.batch_size)
 
+        batches = iter_documents(args.filter_batch_size)  # TODO: confusing naming
         batches = parallel_filter.filter(
             batches=batches, n_tasks=args.filter_tasks, progress=args.progress
         )
