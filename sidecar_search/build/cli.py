@@ -1,19 +1,3 @@
-# build.py
-
-# Copyright 2024 Kenny Peng
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import json
 import queue
 import sqlite3
@@ -32,11 +16,11 @@ from filelock import FileLock
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
-from .args import SharedArgsMixin
-from .args_base import CommandArgsBase
-from .utils.env_utils import BF16, MODEL, TRUST_REMOTE_CODE
-from .utils.gpu_utils import imap, iunsqueeze, iunzip
-from .utils.table_utils import insert_embeddings, to_sql_binary
+from sidecar_search.args import SharedArgsMixin
+from sidecar_search.args_base import CommandArgsBase
+from sidecar_search.utils.env_utils import BF16, MODEL, TRUST_REMOTE_CODE
+from sidecar_search.utils.gpu_utils import imap, iunsqueeze, iunzip
+from sidecar_search.utils.table_utils import insert_embeddings, to_sql_binary
 
 DocumentIdBatch = tuple[list[str], list[str]]
 
