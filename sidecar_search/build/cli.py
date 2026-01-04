@@ -4,7 +4,7 @@ import sqlite3
 import sys
 from argparse import ArgumentParser
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import batched
 from pathlib import Path
@@ -24,6 +24,7 @@ from sidecar_search.utils.gpu_utils import imap, iunsqueeze, iunzip
 from sidecar_search.utils.table_utils import insert_embeddings, to_sql_binary
 
 DocumentIdBatch = tuple[list[str], list[str]]
+DocumentEmbeddingBatch = tuple[list[str], torch.Tensor]
 
 
 @dataclass
@@ -144,13 +145,13 @@ class SharedConnection:
 
     def insert_async(
         self, oa_ids: Iterable[str], embeddings: Iterable[torch.Tensor]
-    ) -> None:
-        def _insert():
+    ) -> Future[None]:
+        def _insert() -> None:
             conn = self._ensure_conn()
             insert_embeddings(oa_ids, embeddings, conn)
             conn.commit()
 
-        _ = self._worker.submit(_insert)
+        return self._worker.submit(_insert)
 
     def _ensure_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -231,7 +232,7 @@ def encode_pipelined(
     batches: Iterable[DocumentIdBatch],
     model: SentenceTransformer,
     n_tasks: int,
-) -> Generator[tuple[list[str], torch.Tensor], None, None]:
+) -> Generator[DocumentEmbeddingBatch, None, None]:
     ids_batches, documents_batches = iunzip(batches, 2)
     documents_batches = iunsqueeze(documents_batches)
     embeddings_batches = imap(
@@ -240,6 +241,22 @@ def encode_pipelined(
     batches_out = zip(ids_batches, embeddings_batches)
     for ids_batch, embeddings_batch in batches_out:
         yield ids_batch, embeddings_batch
+
+
+def insert_as_completed(
+    batches: Iterable[DocumentEmbeddingBatch], conn: SharedConnection, n_tasks: int
+) -> None:
+    pending: deque[Future[None]] = deque()
+
+    for ids_batch, embeddings_batch in batches:
+        while (pending and pending[0].done()) or len(pending) > n_tasks:
+            pending.popleft().result()
+
+        fut = conn.insert_async(ids_batch, embeddings_batch)
+        pending.append(fut)
+
+    for fut in pending:
+        fut.result()
 
 
 def build_main(args: BuildArgs) -> int:
@@ -261,7 +278,7 @@ def build_main(args: BuildArgs) -> int:
             batches=batches, n_tasks=args.filter_tasks, progress=args.progress
         )
         batches = encode_pipelined(batches, model, args.tasks)
-        for ids_batch, embeddings_batch in batches:
-            conn.insert_async(ids_batch, embeddings_batch)
+
+        insert_as_completed(batches, conn, args.tasks)
 
     return 0
