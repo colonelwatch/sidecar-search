@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from itertools import batched
+from itertools import batched, chain
 from pathlib import Path
 from subprocess import PIPE, Popen
 from typing import BinaryIO, Generator, Iterable, Literal, Self, cast
@@ -161,27 +161,31 @@ class ParallelFilter:
     def __init__(self, conn: SharedConnection, batch_size: int) -> None:
         self._conn = conn
         self._batch_size = batch_size
-        self._filtereds: deque[tuple[str, str]] = deque()
         self._counter: tqdm | None = None
 
     def filter(
         self,
-        batches: Iterable[DocumentIdBatch],
+        inputs: Iterable[DocumentIdBatch],
         n_tasks: int = 0,
         progress: bool = False,
     ) -> Generator[DocumentIdBatch, None, None]:
         if progress:
             self._counter = tqdm()
 
-        for filtered in imap(batches, self._filt, n_tasks):
-            self._filtereds.extend(filtered.items())
-            yield from self._roll(False)
-        yield from self._roll(True)
+        batches = imap(inputs, self._filt, n_tasks)
+        batches = batched(chain.from_iterable(batches), self._batch_size)
+        for batch in batches:
+            ids: list[str] = []
+            documents: list[str] = []
+            for id_, document in batch:
+                ids.append(id_)
+                documents.append(document)
+            yield ids, documents
 
         if self._counter is not None:
             self._counter.close()
 
-    def _filt(self, ids: list[str], documents: list[str]):
+    def _filt(self, ids: list[str], documents: list[str]) -> Iterable[tuple[str, str]]:
         batch = {id_: document for id_, document in zip(ids, documents)}
         for id_ in self._conn.pick_existing(ids):
             del batch[id_]
@@ -189,21 +193,7 @@ class ParallelFilter:
         if self._counter is not None:
             self._counter.update(len(ids))  # update with the unfiltered count
 
-        return batch
-
-    def _roll(self, drain: bool):
-        while len(self._filtereds) >= self._batch_size or (drain and self._filtereds):
-            ids_out: list[str] = []
-            documents_out: list[str] = []
-            for _ in range(self._batch_size):
-                try:
-                    id_, document = self._filtereds.popleft()
-                except IndexError:
-                    break
-                ids_out.append(id_)
-                documents_out.append(document)
-
-            yield ids_out, documents_out
+        return batch.items()
 
 
 # built from SentenceTransformer.encode but with non-blocking CPU-to-GPU transfers
@@ -273,7 +263,7 @@ def build_main(args: BuildArgs) -> int:
 
         batches = iter_documents(args.filter_batch_size)  # TODO: confusing naming
         batches = parallel_filter.filter(
-            batches=batches, n_tasks=args.filter_tasks, progress=args.progress
+            inputs=batches, n_tasks=args.filter_tasks, progress=args.progress
         )
         batches = encode_pipelined(batches, model, args.tasks)
 
