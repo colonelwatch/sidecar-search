@@ -1,5 +1,4 @@
 import json
-import queue
 import sqlite3
 import sys
 from argparse import ArgumentParser
@@ -9,7 +8,6 @@ from dataclasses import dataclass
 from itertools import batched
 from pathlib import Path
 from subprocess import PIPE, Popen
-from threading import Event, Thread
 from typing import BinaryIO, Generator, Iterable, Literal, Self, cast
 
 import torch
