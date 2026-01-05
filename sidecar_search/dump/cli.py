@@ -1,5 +1,5 @@
 import sqlite3
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import rmtree
@@ -49,19 +49,6 @@ class DumpArgs(SharedArgsMixin, CommandArgsBase[Literal["dump"]]):
         parser.add_argument(
             "--no-enforce-dtype", action="store_false", dest="enforce_dtype"
         )
-
-
-def parse_args() -> Namespace:
-    parser = ArgumentParser("dump.py", description="Dumps embeddings to parquet files.")
-    parser.add_argument("source", type=Path)
-    parser.add_argument("dest", type=Path)
-    parser.add_argument("-b", "--batch-size", default=1024, type=int)
-    parser.add_argument("-s", "--shard-size", default=4194304, type=int)  # under 4GB
-    parser.add_argument("--row-group-size", default=262144, type=int)  # around 128MB
-    parser.add_argument(
-        "--no-enforce-dtype", action="store_false", dest="enforce_dtype"
-    )
-    return parser.parse_args()
 
 
 def to_arrays(
