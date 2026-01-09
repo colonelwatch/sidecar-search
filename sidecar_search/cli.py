@@ -6,7 +6,7 @@ from typing import assert_never, cast, get_args
 from .args import SharedArgsMixin
 from .args_base import ArgsBase
 from .build.cli import BuildArgs, build_main
-from .dump import DumpArgs, dump_main
+from .dump.cli import DumpArgs, dump_main
 from .index import AllIndexSubcommandArgs, IndexGroupArgs, index_main
 
 AllCommandArgs = BuildArgs | IndexGroupArgs | DumpArgs
