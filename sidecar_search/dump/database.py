@@ -1,6 +1,7 @@
 import sqlite3
+from itertools import batched
 from pathlib import Path
-from typing import Generator, Literal
+from typing import Generator, Iterable, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -12,31 +13,29 @@ from .parquet_utils import open_parquet, write_to_parquet
 
 
 def _to_arrays(
-    ids: list[str], embeddings: list[npt.NDArray]
+    tups: Iterable[tuple[str, npt.NDArray]],
 ) -> tuple[pa.Array, pa.Array]:
+    ids: list[str] = []
+    embeddings: list[npt.NDArray] = []
+    for id_, embedding in tups:
+        ids.append(id_)
+        embeddings.append(embedding)
+
     dim = embeddings[0].shape[0]
     flattened = np.hstack(embeddings)
     embeddings_arr = pa.FixedSizeListArray.from_arrays(flattened, dim)
     ids_arr = pa.array(ids, pa.string())
+
     return ids_arr, embeddings_arr
 
 
 def _to_chunks(
-    dataset: sqlite3.Cursor, size: int
+    conn: sqlite3.Connection, size: int
 ) -> Generator[tuple[pa.Array, pa.Array], None, None]:
-    ids_batch: list[str] = []
-    embeddings_batch: list[npt.NDArray] = []
-    for id_, embedding in dataset:
-        ids_batch.append(id_)
-        embeddings_batch.append(embedding)
-
-        if len(ids_batch) >= size:
-            yield _to_arrays(ids_batch, embeddings_batch)
-            ids_batch = []
-            embeddings_batch = []
-
-    if ids_batch:
-        yield _to_arrays(ids_batch, embeddings_batch)
+    cursor = conn.execute("SELECT * FROM embeddings ORDER BY rowid")
+    batches = batched(cursor, size)
+    for batch in batches:
+        yield _to_arrays(batch)
 
 
 def dump_database(
@@ -64,14 +63,10 @@ def dump_database(
         embedding = conn.execute("SELECT embedding FROM embeddings LIMIT 1")
         dim = embedding.fetchone()[0].shape[0]
 
-        # iterate through this massive query in chunks
-        cursor = conn.execute("SELECT * FROM embeddings ORDER BY rowid")
-        chunks = _to_chunks(cursor, row_group_size)
-
         id_ = 0  # shard id
         counter = 0  # the number of rows the current shard will have
         shard = open_parquet(dest / f"data_{id_:03}.parquet", dim, bf16)
-        for ids_chunk, embd_chunk in chunks:
+        for ids_chunk, embd_chunk in _to_chunks(conn, row_group_size):
             # start by assuming this shard will get the whole chunk
             counter += len(ids_chunk)
 
