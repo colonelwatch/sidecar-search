@@ -7,7 +7,7 @@ from .args import SharedArgsMixin
 from .args_base import ArgsBase
 from .build.cli import BuildArgs, build_main
 from .dump.cli import DumpArgs, dump_main
-from .index import AllIndexSubcommandArgs, IndexGroupArgs, index_main
+from .index.cli import AllIndexSubcommandArgs, IndexGroupArgs, index_main
 
 AllCommandArgs = BuildArgs | IndexGroupArgs | DumpArgs
 AllArgs = BuildArgs | AllIndexSubcommandArgs | DumpArgs

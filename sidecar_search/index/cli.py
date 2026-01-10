@@ -1,19 +1,3 @@
-# index.py
-
-# Copyright 2025 Kenny Peng
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import json
 import logging
 import os
@@ -49,16 +33,16 @@ from datasets.fingerprint import Hasher
 from faiss.contrib.ondisk import merge_ondisk
 from tqdm import tqdm
 
-from .args import SharedArgsMixin
-from .args_base import CommandGroupArgsBase, SubcommandArgsBase
-from .utils.cache_utils import (
+from sidecar_search.args import SharedArgsMixin
+from sidecar_search.args_base import CommandGroupArgsBase, SubcommandArgsBase
+from sidecar_search.utils.cache_utils import (
     clean_hf_cache,
     clean_persistent_cache,
     get_cache_dir,
     seal_hf_cache,
     seal_persistent_cache,
 )
-from .utils.gpu_utils import imap, imap_multi_gpu, iunsqueeze
+from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu, iunsqueeze
 
 TRAIN_SIZE_MULTIPLE = 50  # x clusters = train size recommended by FAISS folks
 OPQ_PATTERN = re.compile(r"OPQ([0-9]+)(?:_([0-9]+))?")
