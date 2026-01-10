@@ -37,7 +37,7 @@ def main() -> int:
         args = cast(AllArgs, CliArgs.from_namespace(args))
     except ValueError as e:  # TODO: make my own exception class?
         print("error:", e.args[0], file=stderr)
-        return 1
+        return 2
 
     match args.command:
         case "build":
