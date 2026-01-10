@@ -1,9 +1,7 @@
 import json
 import logging
-import os
 import re
 import warnings
-from abc import ABC, abstractmethod
 from argparse import ArgumentParser
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -28,7 +26,6 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from datasets import Dataset, disable_progress_bars
-from datasets.fingerprint import Hasher
 from faiss.contrib.ondisk import merge_ondisk
 from tqdm import tqdm
 
@@ -37,11 +34,12 @@ from sidecar_search.args_base import CommandGroupArgsBase, SubcommandArgsBase
 from sidecar_search.utils.cache_utils import (
     clean_hf_cache,
     clean_persistent_cache,
-    get_cache_dir,
     seal_hf_cache,
     seal_persistent_cache,
 )
 from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu, iunsqueeze
+
+from .provisioner import Provisioner
 
 TRAIN_SIZE_MULTIPLE = 50  # x clusters = train size recommended by FAISS folks
 OPQ_PATTERN = re.compile(r"OPQ([0-9]+)(?:_([0-9]+))?")
@@ -281,35 +279,6 @@ def load_dataset(dir: Path) -> Dataset:
     dataset: Dataset = Dataset.from_parquet(paths)  # type: ignore
     ids = np.arange(len(dataset), dtype=np.int32)  # add unique integer IDs for later
     return dataset.add_column("index", ids)  # type: ignore  (wrong func signature)
-
-
-class Provisioner[T](ABC):
-    def __init__(self, **kwargs: Any) -> None:
-        self._kwargs = kwargs
-
-    @abstractmethod
-    def provision(self, progress: bool = False) -> T: ...
-
-    def _compute_cache_path(self) -> Path:
-        return get_cache_dir() / self._compute_cache_filename()
-
-    @abstractmethod
-    def _compute_cache_filename(self) -> str:
-        return self._compute_cache_hash()
-
-    def _compute_cache_hash(self) -> str:
-        sorted_keys = sorted(self._kwargs.keys())
-        hasher = Hasher()
-        for k in sorted_keys:
-            v = self._kwargs[k]
-            if isinstance(v, Dataset):
-                v = v._fingerprint
-            if isinstance(v, Path):
-                if not v.exists():
-                    raise ValueError("input file does not exist")
-                v = (v, os.path.getmtime(v))
-            hasher.update(v)
-        return hasher.hexdigest()
 
 
 def iter_tensors(
