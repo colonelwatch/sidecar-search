@@ -50,8 +50,3 @@ def main() -> int:
             assert_never(args.command)
 
     return ret
-
-
-# TODO: delete this
-if __name__ == "__main__":
-    exit(main())

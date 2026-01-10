@@ -107,7 +107,7 @@ def build_main(args: BuildArgs) -> int:
     embedding_dim = model.get_sentence_embedding_dimension()
     if embedding_dim is None:
         print("error: model doesn't have exact embedding dim", file=sys.stderr)
-        exit(1)
+        return 1
 
     with SharedConnection(args.data_path) as conn:
         parallel_filter = ParallelFilter(conn, args.batch_size)
