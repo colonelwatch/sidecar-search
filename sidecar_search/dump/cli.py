@@ -38,17 +38,16 @@ class DumpArgs(SharedArgsMixin, CommandArgsBase[Literal["dump"]]):
             "--no-enforce-dtype", action="store_false", dest="enforce_dtype"
         )
 
+    def __post_init__(self) -> None:
+        if not self.source.exists():
+            raise ValueError(f'source path "{self.source}" does not exist')
+        if self.dest.exists():
+            raise ValueError(f'destination path "{self.dest}" exists')
+
 
 def dump_main(args: DumpArgs) -> int:
     source = args.source
-    if not source.exists():
-        print(f'error: source path "{source}" does not exist', file=stderr)
-        return 1
-
     dest = args.dest
-    if dest.exists():
-        print(f'error: destination path "{dest}" exists', file=stderr)
-        return 1
 
     if args.enforce_dtype:
         enforce = "bf16" if BF16 else "fp16"
