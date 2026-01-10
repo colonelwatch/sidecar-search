@@ -39,6 +39,7 @@ from sidecar_search.utils.cache_utils import (
 )
 from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu, iunsqueeze
 
+from .faiss_utils import to_cpu, to_gpu
 from .provisioner import Provisioner
 
 TRAIN_SIZE_MULTIPLE = 50  # x clusters = train size recommended by FAISS folks
@@ -532,17 +533,6 @@ class MemmapProvisioner(Provisioner[NDMemmap[np.float32]]):
 
     def _compute_cache_filename(self) -> str:
         return f"train_{self._compute_cache_hash()}.memmap"
-
-
-def to_gpu(index: faiss.Index, device: int = 0) -> faiss.Index:
-    opts = faiss.GpuClonerOptions()
-    opts.useFloat16 = True  # float16 is necessary for codes sized 56 bits and over
-    env = faiss.StandardGpuResources()
-    return faiss.index_cpu_to_gpu(env, device, index, opts)
-
-
-def to_cpu(index: faiss.Index) -> faiss.Index:
-    return faiss.index_gpu_to_cpu(index)
 
 
 def train_index(
