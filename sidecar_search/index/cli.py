@@ -4,13 +4,12 @@ import os
 import re
 import warnings
 from abc import ABC, abstractmethod
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from itertools import accumulate, tee
 from pathlib import Path
 from shutil import copy, rmtree
-from sys import stderr
 from typing import (
     Any,
     Generator,
