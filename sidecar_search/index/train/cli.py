@@ -3,22 +3,19 @@ import warnings
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Self, TypedDict, Unpack
+from typing import Literal
 
 import faiss  # many monkey-patches, see faiss/python/class_wrappers.py in faiss repo
 import numpy as np
-import torch
 from datasets import Dataset
-from tqdm import tqdm
 
 from sidecar_search.args_base import SubcommandArgsBase
 from sidecar_search.utils.contextmanager_utils import del_on_exc
-from sidecar_search.utils.gpu_utils import imap
 
 from ..args import IndexSharedArgsMixin
-from ..utils.datasets_utils import iter_tensors
+from ..parameters import save_params
 from ..utils.faiss_utils import to_cpu, to_gpu
-from ..provisioner import Provisioner
+from .memmap import MemmapProvisioner, NDMemmap
 
 TRAIN_SIZE_MULTIPLE = 50  # x clusters = train size recommended by FAISS folks
 OPQ_PATTERN = re.compile(r"OPQ([0-9]+)(?:_([0-9]+))?")
@@ -72,92 +69,21 @@ class IndexTrainArgs(
             raise ValueError(f'preprocessing string "{self.preprocess}" is not valid')
 
 
-class MemmapKwargs(TypedDict):
-    dataset: Dataset
-    shape: tuple[int, int]
-    normalize: bool
-
-
-type NDMemmap[T: np.generic] = np.memmap[Any, np.dtype[T]]
-
-
-class MemmapBuilder:
-    def __init__(self, **kwargs: Unpack[MemmapKwargs]) -> None:
-        self._dataset = kwargs["dataset"]
-        self._shape = kwargs["shape"]
-        self._normalize = kwargs["normalize"]
-
-    def build(self, path: Path, progress: bool = False) -> NDMemmap[np.float32]:
-        n, _ = self._shape
-        i = 0
-        memmap = np.memmap(path, np.float32, mode="w+", shape=self._shape)
-        with (
-            del_on_exc(path),
-            tqdm(desc="create_memmap", total=n, disable=(not progress)) as counter,
-        ):
-            # save batches to disk by assigning to memmap slices
-            batches = iter_tensors(self._dataset)
-            batches = imap(batches, self._preproc, -1)
-            for embeddings_batch in batches:
-                n_batch = len(embeddings_batch)
-
-                if i + n_batch > n:
-                    n_batch = n - i
-                    embeddings_batch = embeddings_batch[:n_batch]
-
-                memmap[i : (i + n_batch)] = embeddings_batch.numpy()
-                i += n_batch
-                counter.update(n_batch)
-
-                if i >= n:
-                    break
-
-            # memmap holds (now) leaked memory, so flush...
-            memmap.flush()
-
-        # ... and recreate memmap, letting the original go out-of-scope
-        return np.memmap(path, np.float32, mode="r", shape=self._shape)
-
-    def _preproc(self, _, embeddings: torch.Tensor) -> torch.Tensor:
-        _, d = self._shape
-        embeddings = embeddings[:, :d]
-        if embeddings.shape[1] != d:
-            raise ValueError("embeddings dimensions was less than d")
-        if self._normalize:
-            embeddings = torch.nn.functional.normalize(embeddings)
-        return embeddings
-
-
-class MemmapProvisioner(Provisioner[NDMemmap[np.float32]]):
-    def __init__(self, **kwargs: Unpack[MemmapKwargs]) -> None:
-        super().__init__(**kwargs)
-        self._shape = kwargs["shape"]
-
-    @classmethod
-    def with_train_args(cls, dataset: Dataset, args: IndexTrainArgs) -> Self:
-        n = len(dataset)
-        d = args.dimensions
-        if d is None:
-            d = len(dataset[0]["embedding"])
-        return cls(dataset=dataset, shape=(n, d), normalize=args.normalize)
-
-    def provision(self, progress: bool = False) -> NDMemmap[np.float32]:
-        cache_path = self._compute_cache_path()
-        if cache_path.exists():
-            return np.memmap(cache_path, np.float32, mode="r", shape=self._shape)
-        builder = MemmapBuilder(**self._kwargs)
-        memmap = builder.build(cache_path, progress=progress)
-        return memmap
-
-    def _compute_cache_filename(self) -> str:
-        return f"train_{self._compute_cache_hash()}.memmap"
+def provision_memmap(dataset: Dataset, args: IndexTrainArgs) -> NDMemmap[np.float32]:
+    n = len(dataset)
+    d = args.dimensions
+    if d is None:
+        d = len(dataset[0]["embedding"])
+    provisioner = MemmapProvisioner(
+        dataset=dataset, shape=(n, d), normalize=args.normalize
+    )
+    return provisioner.provision(progress=args.progress)
 
 
 def train_index(
     train: Dataset, factory_string: str, args: IndexTrainArgs
 ) -> faiss.Index:
-    provisioner = MemmapProvisioner.with_train_args(train, args)
-    train_memmap = provisioner.provision(progress=args.progress)
+    train_memmap = provision_memmap(train, args)
 
     # doing a bit of testing seems to show that passing METRIC_L2 is superior to passing
     # METRIC_INNER_PRODUCT for the same factory string, even for normalized embeddings
