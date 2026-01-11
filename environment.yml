@@ -1,5 +1,7 @@
 name: sidecar-search-dev
 channels:
+  - pytorch
+  - nvidia
   - conda-forge
 dependencies:
   - python
@@ -9,5 +11,5 @@ dependencies:
   - tqdm
   - numpy>=1.26.4
   - pyarrow
-  - faiss-gpu~=1.9.0
+  - pytorch::faiss-gpu~=1.9
   - datasets>=3.3.2
