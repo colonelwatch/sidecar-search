@@ -25,8 +25,6 @@ from .train.cli import IndexTrainArgs, ensure_trained
 from .tune.cli import IndexTuneArgs, ensure_tuned
 from .utils.datasets_utils import BATCH_SIZE, resolve_dimensions
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class IndexCleanArgs(
