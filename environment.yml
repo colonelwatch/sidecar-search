@@ -5,7 +5,7 @@ channels:
   - conda-forge
 dependencies:
   - python
-  - pytorch~=2.6
+  - pytorch-gpu~=2.6
   - filelock
   - sentence-transformers~=3.4
   - tqdm
