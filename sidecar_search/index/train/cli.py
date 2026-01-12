@@ -14,6 +14,7 @@ from sidecar_search.utils.contextmanager_utils import del_on_exc
 
 from ..args import IndexSharedArgsMixin
 from ..parameters import save_params
+from ..utils.datasets_utils import resolve_dimensions
 from ..utils.faiss_utils import to_cpu, to_gpu
 from .memmap import MemmapProvisioner, NDMemmap
 
@@ -71,9 +72,7 @@ class IndexTrainArgs(
 
 def provision_memmap(dataset: Dataset, args: IndexTrainArgs) -> NDMemmap[np.float32]:
     n = len(dataset)
-    d = args.dimensions
-    if d is None:
-        d = len(dataset[0]["embedding"])
+    d = resolve_dimensions(dataset, args.dimensions)
     provisioner = MemmapProvisioner(
         dataset=dataset, shape=(n, d), normalize=args.normalize
     )

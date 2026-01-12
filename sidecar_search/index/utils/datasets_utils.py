@@ -6,6 +6,13 @@ from datasets import Dataset
 BATCH_SIZE = 1024
 
 
+# TODO: resolve this sooner than later
+def resolve_dimensions(dataset: Dataset, dimensions: int | None) -> int:
+    if dimensions is None:
+        dimensions = len(dataset[0]["embedding"])
+    return dimensions
+
+
 def iter_tensors(
     dataset: Dataset,
 ) -> Generator[tuple[torch.Tensor, torch.Tensor], None, None]:
