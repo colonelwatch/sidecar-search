@@ -1,9 +1,18 @@
+from pathlib import Path
 from typing import Generator
 
+import numpy as np
 import torch
 from datasets import Dataset
 
 BATCH_SIZE = 1024
+
+
+def load_dataset(dir: Path) -> Dataset:
+    paths = [str(path) for path in dir.glob("*.parquet")]
+    dataset: Dataset = Dataset.from_parquet(paths)  # type: ignore
+    ids = np.arange(len(dataset), dtype=np.int32)  # add unique integer IDs for later
+    return dataset.add_column("index", ids)  # type: ignore  (wrong func signature)
 
 
 # TODO: resolve this sooner than later
