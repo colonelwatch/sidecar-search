@@ -44,6 +44,10 @@ class SharedConnection:
     def pick_existing(self, ids: list[str]) -> list[str]:
         def _pick_existing():
             conn = self._ensure_conn()
+            conn.executemany(
+                "INSERT into v2 VALUES(?) ON CONFLICT DO NOTHING",
+                [(id_,) for id_ in ids],
+            )
             placeholders = ", ".join("?" * len(ids))
             return conn.execute(
                 f"SELECT id from embeddings WHERE id IN ({placeholders})", ids
