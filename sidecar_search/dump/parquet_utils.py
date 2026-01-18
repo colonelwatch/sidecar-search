@@ -5,7 +5,7 @@ import pyarrow.parquet as pq
 
 
 def open_parquet(path: str | Path, dim: int, bf16: bool) -> pq.ParquetWriter:
-    schema = {"id": pa.string()}
+    schema: dict[str, pa.DataType] = {"id": pa.string()}
     if bf16:
         # the conversion from bfloat16 to float32 leaves 16 bits of mantissa which are
         # completely zero. Exploit this with byte-stream split and lz4 compression
@@ -26,5 +26,6 @@ def open_parquet(path: str | Path, dim: int, bf16: bool) -> pq.ParquetWriter:
 def write_to_parquet(
     ids_chunk: pa.Array, embd_chunk: pa.Array, writer: pq.ParquetWriter
 ) -> None:
-    batch = pa.table([ids_chunk, embd_chunk], schema=writer.schema)
+    schema: pa.Schema = writer.schema  # type: ignore # pyarrow-stubs is wrong here
+    batch = pa.table([ids_chunk, embd_chunk], schema=schema)
     writer.write_table(batch, row_group_size=len(ids_chunk))

@@ -13,3 +13,6 @@ dependencies:
   - pyarrow
   - pytorch::faiss-gpu~=1.9
   - datasets>=3.3.2
+  # development only
+  - pyarrow-stubs
+  - pyright

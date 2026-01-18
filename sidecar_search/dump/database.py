@@ -22,8 +22,9 @@ def _to_arrays(
         embeddings.append(embedding)
 
     dim = embeddings[0].shape[0]
-    flattened = np.hstack(embeddings)
-    embeddings_arr = pa.FixedSizeListArray.from_arrays(flattened, dim)
+    embeddings_arr = np.hstack(embeddings)
+    embeddings_arr = pa.array(embeddings_arr)
+    embeddings_arr = pa.FixedSizeListArray.from_arrays(embeddings_arr, dim)
     ids_arr = pa.array(ids, pa.string())
 
     return ids_arr, embeddings_arr
