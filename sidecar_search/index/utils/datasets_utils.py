@@ -31,7 +31,8 @@ def resolve_dimensions(dataset: Dataset, dimensions: int | None) -> int:
 def iter_tensors(
     dataset: Dataset,
 ) -> Generator[tuple[torch.Tensor, torch.Tensor], None, None]:
-    with dataset.formatted_as("torch", columns=["index", "embedding"]):
-        for batch in dataset.iter(BATCH_SIZE):
-            batch = cast(dict[str, torch.Tensor], batch)
-            yield batch["index"], batch["embedding"]
+    cols = dataset.select_columns(["index", "embedding"])
+    cols.set_format("torch")
+    for batch in cols.iter(BATCH_SIZE):
+        batch = cast(dict[str, torch.Tensor], batch)
+        yield batch["index"], batch["embedding"]
