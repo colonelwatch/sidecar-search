@@ -23,8 +23,8 @@ def bool_from_str(value: str) -> bool:
         raise ValueError(f'invalid value "{value}", expected bool-like')
 
 
-CACHE = get_env_var("ABSEARCH_CACHE", Path, Path.home() / ".cache/abstracts-search")
-MODEL = get_env_var("ABSEARCH_MODEL", default="all-MiniLM-L6-v2")
-TRUST_REMOTE_CODE = get_env_var("ABSEARCH_TRUST_REMOTE_CODE", bool_from_str, False)
-FP16 = get_env_var("ABSEARCH_FP16", bool_from_str, False)
+CACHE = get_env_var("SIDECARSEARCH_CACHE", Path, Path.home() / ".cache/sidecar-search")
+MODEL = get_env_var("SIDECARSEARCH_MODEL", default="all-MiniLM-L6-v2")
+TRUST_REMOTE_CODE = get_env_var("SIDECARSEARCH_TRUST_REMOTE_CODE", bool_from_str, False)
+FP16 = get_env_var("SIDECARSEARCH_FP16", bool_from_str, False)
 BF16 = not FP16  # support only bf16 or fp16 for simplicity
