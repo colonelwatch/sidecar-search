@@ -14,7 +14,7 @@ def open_parquet(path: str | Path, dim: int, bf16: bool) -> pq.ParquetWriter:
             str(path),
             pa.schema(schema),
             compression="lz4",
-            use_byte_stream_split=["embedding"],  # type: ignore (documented option)
+            use_byte_stream_split=["embedding"],
         )
     else:
         # otherwise, compressing float embeddings isn't worth it

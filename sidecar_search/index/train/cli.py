@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-import faiss  # many monkey-patches, see faiss/python/class_wrappers.py in faiss repo
+import faiss
 import numpy as np
 from datasets import Dataset
 
@@ -90,7 +90,7 @@ def train_index(
     index: faiss.Index = faiss.index_factory(d, factory_string, faiss.METRIC_L2)
 
     index = to_gpu(index)
-    index.train(train_memmap)  # type: ignore (monkey-patched)
+    index.train(train_memmap)  # type: ignore # faiss class_wrappers.py
     index = to_cpu(index)
 
     return index

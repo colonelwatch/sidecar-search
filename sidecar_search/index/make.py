@@ -120,7 +120,9 @@ class MakeIndexBuilder:
         self, device: torch.device, ids: torch.Tensor, embeddings: torch.Tensor
     ) -> int:
         on_gpu = self._on_gpus[device.index]
-        on_gpu.add_with_ids(embeddings.numpy(), ids.numpy())  # type: ignore
+        on_gpu.add_with_ids(  # type: ignore # faiss class_wrappers.py
+            embeddings.numpy(), ids.numpy()
+        )
         return len(ids)  # yield the number of embeddings added
 
     def _transfer_and_reset(self, on_gpu: faiss.Index) -> faiss.Index:

@@ -1,5 +1,5 @@
 from itertools import accumulate, tee
-from typing import TypedDict, Unpack
+from typing import TypedDict, Unpack, cast
 
 import torch
 from datasets import Dataset
@@ -34,8 +34,8 @@ class GroundTruthBuilder:
         # TODO: calling _getitem is a workaround, bypassing the Column class
         #       used since datasets 4.0.0, but this should be rewritten sometime
         with queries.formatted_as("torch", columns=["embedding", "index"]):
-            q_embeddings: torch.Tensor = queries._getitem("embedding")  # type: ignore
-            q_ids: torch.Tensor = queries._getitem("index")  # type: ignore
+            q_embeddings = cast(torch.Tensor, queries._getitem("embedding"))
+            q_ids = cast(torch.Tensor, queries._getitem("index"))
 
         if do_inner_product_search:
             q_embeddings = torch.nn.functional.normalize(q_embeddings)

@@ -2,9 +2,9 @@ import json
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-import faiss  # many monkey-patches, see faiss/python/class_wrappers.py in faiss repo
+import faiss
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -67,31 +67,32 @@ class IndexTuneArgs(
 
 
 def tune_index(
-    filled_index: faiss.Index, ground_truth: Dataset, args: IndexTuneArgs
+    index: faiss.Index, ground_truth: Dataset, args: IndexTuneArgs
 ) -> list[IndexParameters]:
+    # faiss expects float32 embeddings and int64 IDs
     with ground_truth.formatted_as("numpy"):
-        q: npt.NDArray[np.float32] = ground_truth._getitem("embedding")  # type: ignore
-        gt_ids: npt.NDArray[np.int32] = ground_truth._getitem("gt_ids")  # type: ignore
+        q = cast(npt.NDArray, ground_truth._getitem("embedding")).astype(np.float32)
+        gt_ids = cast(npt.NDArray, ground_truth._getitem("gt_ids")).astype(np.int64)
 
     if args.dimensions is not None:
         q = q[:, : args.dimensions]
     if args.normalize:
         q = q / np.linalg.norm(q, ord=2, axis=1)[:, np.newaxis]
-    gt_ids_int64 = gt_ids.astype(np.int64)  # faiss expects int64
 
     # init with ground-truth IDs but not ground-truth distances because faiss doesn't
     # use them anyway (see faiss/AutoTune.cpp)
     if args.one_recall_at_one:
-        criterion = faiss.OneRecallAtRCriterion(len(ground_truth), 1)
+        crit = faiss.OneRecallAtRCriterion(len(ground_truth), 1)
     else:
-        criterion = faiss.IntersectionCriterion(len(ground_truth), args.k)
-    criterion.set_groundtruth(None, gt_ids_int64)  # type: ignore (monkey-patched)
+        crit = faiss.IntersectionCriterion(len(ground_truth), args.k)
+    crit.set_groundtruth(None, gt_ids)  # type: ignore # faiss class_wrappers.py
 
     p_space = faiss.ParameterSpace()
     p_space.verbose = args.progress
-    p_space.initialize(filled_index)
-    results: faiss.OperatingPoints = p_space.explore(  # type: ignore (monkey-patched)
-        filled_index, q, criterion
+    p_space.initialize(index)
+    results = p_space.explore(index, q, crit)  # type: ignore # faiss class_wrappers.py
+    assert isinstance(results, faiss.OperatingPoints), (
+        "faiss violated documentation about return type"
     )
 
     pareto_vector: faiss.OperatingPointVector = results.optimal_pts
@@ -120,7 +121,7 @@ def ensure_tuned(dataset: Dataset, args: IndexTuneArgs) -> None:
     ground_truth = provisioner.provision(progress=args.progress)
 
     with queries.formatted_as("torch"):
-        q_ids: torch.Tensor = queries._getitem("index")  # type: ignore
+        q_ids = cast(torch.Tensor, queries._getitem("index"))
 
     dimensions = resolve_dimensions(dataset, args.dimensions)
     provisioner = MakeIndexProvisioner(
