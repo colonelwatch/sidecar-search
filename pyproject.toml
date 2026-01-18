@@ -8,7 +8,7 @@ version = "0.0.0"
 authors = [
 	{name = "Kenny Peng", email = "knypng44@gmail.com"}
 ]
-description = "Build tools for sidecar indicies to add semantic search to anything"
+description = "CLI build tools for sidecar indexes to add semantic search to anything"
 classifiers = [
 	"Development Status :: 1 - Planning",
 	"Intended Audience :: Developers",
