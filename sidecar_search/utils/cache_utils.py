@@ -36,6 +36,8 @@ def seal_persistent_cache() -> None:
 
 
 def clean_persistent_cache() -> None:
+    if not CACHE.exists():
+        return
     rmtree(CACHE)
 
 
