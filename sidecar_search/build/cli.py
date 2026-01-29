@@ -104,11 +104,6 @@ def build_main(args: BuildArgs) -> int:
     with FileLock("/tmp/abstracts-search-gpu.lock"):
         model = get_model(MODEL, BF16, TRUST_REMOTE_CODE)
 
-    embedding_dim = model.get_sentence_embedding_dimension()
-    if embedding_dim is None:
-        print("error: model doesn't have exact embedding dim", file=sys.stderr)
-        return 1
-
     with SharedConnection(args.data_path) as conn:
         parallel_filter = ParallelFilter(conn, args.batch_size)
 
