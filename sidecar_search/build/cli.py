@@ -16,8 +16,8 @@ from sidecar_search.args_base import CommandArgsBase
 from sidecar_search.utils.env_utils import BF16, MODEL, TRUST_REMOTE_CODE
 from sidecar_search.utils.gpu_utils import imap, iunsqueeze
 
-from .db import ParallelFilter, SharedConnection, insert_as_completed
-from .encode import DocumentIdBatch, encode_pipelined
+from .build import build_batched
+from .encode import DocumentIdBatch
 
 
 @dataclass
@@ -104,15 +104,15 @@ def build_main(args: BuildArgs) -> int:
     with FileLock("/tmp/abstracts-search-gpu.lock"):
         model = get_model(MODEL, BF16, TRUST_REMOTE_CODE)
 
-    with SharedConnection(args.data_path) as conn:
-        parallel_filter = ParallelFilter(conn, args.batch_size)
-
-        batches = iter_documents(args.filter_batch_size)  # TODO: confusing naming
-        batches = parallel_filter.filter(
-            inputs=batches, n_tasks=args.filter_tasks, progress=args.progress
-        )
-        batches = encode_pipelined(batches, model, args.tasks)
-
-        insert_as_completed(batches, conn, args.tasks)
+    batches = iter_documents(args.filter_batch_size)  # TODO: confusing naming
+    build_batched(
+        batches,
+        model,
+        args.data_path,
+        args.filter_tasks,
+        args.tasks,
+        args.batch_size,
+        progress=args.progress,
+    )
 
     return 0
