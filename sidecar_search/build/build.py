@@ -1,3 +1,4 @@
+from itertools import batched, chain
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -18,12 +19,12 @@ def build_batched(
     progress: bool = False,
 ) -> None:
     with SharedConnection(db_path) as conn:
-        # TODO: refactor rebatching out of ParallelFilter
-        parallel_filter = ParallelFilter(conn, encode_batch_size)
+        parallel_filter = ParallelFilter(conn)
 
         batches = parallel_filter.filter(
             inputs, n_tasks=filter_tasks, progress=progress
         )
+        batches = batched(chain.from_iterable(batches), encode_batch_size)
         batches = encode_pipelined(batches, model_factory, tasks_per_gpu=encode_tasks)
 
         insert_tasks = torch.cuda.device_count() * encode_tasks

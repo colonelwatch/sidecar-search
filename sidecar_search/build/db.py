@@ -1,7 +1,6 @@
 import sqlite3
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
-from itertools import batched, chain
 from pathlib import Path
 from typing import Generator, Iterable, Self
 
@@ -69,9 +68,8 @@ class SharedConnection:
 
 
 class ParallelFilter:
-    def __init__(self, conn: SharedConnection, batch_size: int) -> None:
+    def __init__(self, conn: SharedConnection) -> None:
         self._conn = conn
-        self._batch_size = batch_size
         self._counter: tqdm | None = None
 
     def filter(
@@ -84,13 +82,12 @@ class ParallelFilter:
             self._counter = tqdm()
 
         batches = iunsqueeze(inputs)
-        batches = imap(batches, self._filt, n_tasks)
-        yield from batched(chain.from_iterable(batches), self._batch_size)
+        yield from imap(batches, self._filt, n_tasks)
 
         if self._counter is not None:
             self._counter.close()
 
-    def _filt(self, inputs: DocumentIdBatch) -> Iterable[tuple[str, str]]:
+    def _filt(self, inputs: DocumentIdBatch) -> DocumentIdBatch:
         ids: list[str] = [id_ for id_, _ in inputs]
         existing = set(self._conn.pick_existing(ids))
 
