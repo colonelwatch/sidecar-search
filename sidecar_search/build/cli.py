@@ -6,16 +6,13 @@ from itertools import batched
 from pathlib import Path
 from typing import BinaryIO, Iterable, Literal, cast
 
-import torch
-from sentence_transformers import SentenceTransformer
-
 from sidecar_search.args import SharedArgsMixin
 from sidecar_search.args_base import CommandArgsBase
 from sidecar_search.utils.env_utils import BF16, MODEL, TRUST_REMOTE_CODE
 from sidecar_search.utils.gpu_utils import imap, iunsqueeze
 
 from .build import build_batched
-from .encode import DocumentIdBatch
+from .encode import DocumentIdBatch, get_model
 
 
 @dataclass
@@ -37,16 +34,6 @@ class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
         parser.add_argument("-b", "--batch-size", default=256, type=int)
         parser.add_argument("--filter-tasks", default=5, type=int)
         parser.add_argument("--filter-batch-size", default=1024, type=int)
-
-
-def get_model(
-    model_name: str, bf16: bool, trust_remote_code: bool
-) -> SentenceTransformer:
-    return SentenceTransformer(
-        model_name,
-        trust_remote_code=trust_remote_code,
-        model_kwargs={"torch_dtype": torch.bfloat16 if bf16 else torch.float16},
-    )
 
 
 def _process_lines_batch(batch: Iterable[bytes]) -> DocumentIdBatch:

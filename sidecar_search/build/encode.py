@@ -9,6 +9,16 @@ DocumentIdBatch = tuple[list[str], list[str]]
 DocumentEmbeddingBatch = tuple[list[str], torch.Tensor]
 
 
+def get_model(
+    model_name: str, bf16: bool, trust_remote_code: bool
+) -> SentenceTransformer:
+    return SentenceTransformer(
+        model_name,
+        trust_remote_code=trust_remote_code,
+        model_kwargs={"torch_dtype": torch.bfloat16 if bf16 else torch.float16},
+    )
+
+
 # built from SentenceTransformer.encode but with non-blocking CPU-to-GPU transfers
 def encode_faster(
     model: SentenceTransformer,
