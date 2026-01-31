@@ -36,14 +36,12 @@ class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
         parser.add_argument("--filter-batch-size", default=1024, type=int)
 
 
-def _process_lines_batch(batch: Iterable[bytes]) -> DocumentIdBatch:
-    ids: list[str] = []
-    documents: list[str] = []
-    for line in batch:
+def _process_lines_batch(lines: Iterable[bytes]) -> DocumentIdBatch:
+    batch: DocumentIdBatch = []
+    for line in lines:
         row = json.loads(line)
-        ids.append(row["id"])
-        documents.append(row["document"])
-    return ids, documents
+        batch.append((row["id"], row["document"]))
+    return batch
 
 
 def iter_documents(batch_size: int) -> Iterable[DocumentIdBatch]:

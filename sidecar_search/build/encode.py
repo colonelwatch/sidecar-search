@@ -1,12 +1,12 @@
-from typing import Callable, Generator, Iterable
+from typing import Callable, Generator, Iterable, Sequence
 
 import torch
 from sentence_transformers import SentenceTransformer
 
-from sidecar_search.utils.gpu_utils import imap_multi_gpu, iunsqueeze, iunzip
+from sidecar_search.utils.gpu_utils import imap_multi_gpu, iunsqueeze
 
-DocumentIdBatch = tuple[list[str], list[str]]
-DocumentEmbeddingBatch = tuple[list[str], torch.Tensor]
+DocumentIdBatch = Sequence[tuple[str, str]]
+DocumentEmbeddingBatch = tuple[Sequence[str], torch.Tensor]  # TODO: also convert to AoS
 
 
 def get_model(
@@ -41,22 +41,24 @@ def encode_faster(
 
 # TODO: make a class out of this
 def encode_pipelined(
-    batches: Iterable[DocumentIdBatch],
+    inputs: Iterable[DocumentIdBatch],
     model_factory: Callable[[], SentenceTransformer],
     *,
     tasks_per_gpu: int = 1,
 ) -> Generator[DocumentEmbeddingBatch, None, None]:
     models = [model_factory().to(f"cuda:{i}") for i in range(torch.cuda.device_count())]
 
-    def _encode(device: torch.device, sentences: list[str]) -> torch.Tensor:
-        model = models[device.index]
-        return encode_faster(model, sentences)
+    def _encode(
+        device: torch.device, batch: DocumentIdBatch
+    ) -> tuple[list[str], torch.Tensor]:
+        ids: list[str] = []
+        documents: list[str] = []
+        for id_, document in batch:
+            ids.append(id_)
+            documents.append(document)
 
-    ids_batches, documents_batches = iunzip(batches, 2)
-    documents_batches = iunsqueeze(documents_batches)
-    embeddings_batches = imap_multi_gpu(
-        documents_batches, _encode, tasks_per_gpu=tasks_per_gpu
-    )
-    batches_out = zip(ids_batches, embeddings_batches)
-    for ids_batch, embeddings_batch in batches_out:
-        yield ids_batch, embeddings_batch
+        model = models[device.index]
+        return ids, encode_faster(model, documents)
+
+    batches = iunsqueeze(inputs)
+    yield from imap_multi_gpu(batches, _encode, tasks_per_gpu=tasks_per_gpu)

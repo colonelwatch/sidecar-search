@@ -1,33 +1,10 @@
 import os
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
-from itertools import cycle, tee
-from typing import Any, Callable, Concatenate, Generator, Iterable, Literal, overload
+from itertools import cycle
+from typing import Callable, Concatenate, Generator, Iterable, overload
 
 import torch
-
-
-@overload
-def iunzip[T, U](
-    tups: Iterable[tuple[T, U]], n: Literal[2]
-) -> tuple[Iterable[T], Iterable[U]]: ...
-
-
-@overload
-def iunzip[T, U, V](
-    tups: Iterable[tuple[T, U, V]], n: Literal[3]
-) -> tuple[Iterable[T], Iterable[U], Iterable[V]]: ...
-
-
-def iunzip(tups: Iterable[tuple], n: int) -> tuple[Iterable, ...]:
-    # https://stackoverflow.com/a/77797926
-    tees = tee(tups, n)
-
-    def select(i: int) -> Generator[Any, None, None]:
-        for tup in tees[i]:
-            yield tup[i]
-
-    return tuple(select(i) for i in range(n))
 
 
 def iunsqueeze[T](arg_iter: Iterable[T]) -> Iterable[tuple[T]]:
