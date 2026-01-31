@@ -4,7 +4,7 @@ from argparse import ArgumentParser
 from dataclasses import dataclass
 from itertools import batched
 from pathlib import Path
-from typing import BinaryIO, Iterable, Literal, cast
+from typing import BinaryIO, Iterator, Literal, Sequence, cast
 
 from sidecar_search.args import SharedArgsMixin
 from sidecar_search.args_base import CommandArgsBase
@@ -36,7 +36,7 @@ class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
         parser.add_argument("--filter-batch-size", default=1024, type=int)
 
 
-def _process_lines_batch(lines: Iterable[bytes]) -> DocumentIdBatch:
+def _process_lines_batch(lines: Sequence[bytes]) -> DocumentIdBatch:
     batch: DocumentIdBatch = []
     for line in lines:
         row = json.loads(line)
@@ -44,7 +44,7 @@ def _process_lines_batch(lines: Iterable[bytes]) -> DocumentIdBatch:
     return batch
 
 
-def iter_documents(batch_size: int) -> Iterable[DocumentIdBatch]:
+def iter_documents(batch_size: int) -> Iterator[DocumentIdBatch]:
     stdin_cast = cast(BinaryIO, sys.stdin.buffer)
     inputs = iunsqueeze(batched(stdin_cast, batch_size))
     return imap(inputs, _process_lines_batch, 1, prefetch_factor=3)

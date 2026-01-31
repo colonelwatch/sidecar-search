@@ -1,13 +1,12 @@
 import sqlite3
-from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Generator, Iterable, Self
+from typing import Generator, Iterator, Self
 
 import torch
 from tqdm import tqdm
 
-from sidecar_search.utils.gpu_utils import imap, iunsqueeze
+from sidecar_search.utils.gpu_utils import consume_futures, imap, iunsqueeze
 from sidecar_search.utils.table_utils import insert_embeddings, to_sql_binary
 
 from .encode import DocumentEmbeddingBatch, DocumentIdBatch
@@ -74,7 +73,7 @@ class ParallelFilter:
 
     def filter(
         self,
-        inputs: Iterable[DocumentIdBatch],
+        inputs: Iterator[DocumentIdBatch],
         n_tasks: int = 0,
         progress: bool = False,
     ) -> Generator[DocumentIdBatch, None, None]:
@@ -98,16 +97,8 @@ class ParallelFilter:
 
 
 def insert_as_completed(
-    batches: Iterable[DocumentEmbeddingBatch], conn: SharedConnection, n_tasks: int
+    batches: Iterator[DocumentEmbeddingBatch], conn: SharedConnection, n_tasks: int
 ) -> None:
-    pending: deque[Future[None]] = deque()
-
-    for batch in batches:
-        while (pending and pending[0].done()) or len(pending) > n_tasks:
-            pending.popleft().result()
-
-        fut = conn.insert_async(batch)
-        pending.append(fut)
-
-    for fut in pending:
-        fut.result()
+    futs = (conn.insert_async(batch) for batch in batches)
+    for _ in consume_futures(futs, n_tasks):
+        pass

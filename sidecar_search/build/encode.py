@@ -1,4 +1,4 @@
-from typing import Callable, Generator, Iterable, Sequence
+from typing import Callable, Generator, Iterator, Sequence
 
 import torch
 from sentence_transformers import SentenceTransformer
@@ -50,7 +50,7 @@ def _transpose(batch: DocumentIdBatch) -> tuple[list[str], list[str]]:
 
 # TODO: make a class out of this
 def encode_pipelined(
-    inputs: Iterable[DocumentIdBatch],
+    inputs: Iterator[DocumentIdBatch],
     model_factory: Callable[[], SentenceTransformer],
     *,
     tasks_per_gpu: int = 1,

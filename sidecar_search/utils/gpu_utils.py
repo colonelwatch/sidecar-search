@@ -2,12 +2,26 @@ import os
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from itertools import cycle
-from typing import Callable, Concatenate, Generator, Iterable, overload
+from typing import Callable, Concatenate, Generator, Iterator, overload
 
 import torch
 
 
-def iunsqueeze[T](arg_iter: Iterable[T]) -> Iterable[tuple[T]]:
+def consume_futures[T](
+    futs: Iterator[Future[T]], n_tasks: int
+) -> Generator[T, None, None]:
+    pending: deque[Future[T]] = deque()
+
+    for fut in futs:
+        pending.append(fut)
+        while (pending and pending[0].done()) or len(pending) > n_tasks:
+            yield pending.popleft().result()
+
+    for fut in pending:
+        yield fut.result()
+
+
+def iunsqueeze[T](arg_iter: Iterator[T]) -> Iterator[tuple[T]]:
     for arg in arg_iter:
         yield (arg,)
 
@@ -15,7 +29,7 @@ def iunsqueeze[T](arg_iter: Iterable[T]) -> Iterable[tuple[T]]:
 # NOTE: didn't use TypeVarTuple because it isn't contravariant
 @overload
 def imap[T, U_contra](
-    inputs: Iterable[tuple[U_contra]],
+    inputs: Iterator[tuple[U_contra]],
     func: Callable[[U_contra], T],
     n_tasks: int,
     *,
@@ -25,7 +39,7 @@ def imap[T, U_contra](
 
 @overload
 def imap[T, U_contra, V_contra](
-    inputs: Iterable[tuple[U_contra, V_contra]],
+    inputs: Iterator[tuple[U_contra, V_contra]],
     func: Callable[[U_contra, V_contra], T],
     n_tasks: int,
     *,
@@ -35,7 +49,7 @@ def imap[T, U_contra, V_contra](
 
 @overload
 def imap[T, U_contra, V_contra, W_contra](
-    inputs: Iterable[tuple[U_contra, V_contra, W_contra]],
+    inputs: Iterator[tuple[U_contra, V_contra, W_contra]],
     func: Callable[[U_contra, V_contra, W_contra], T],
     n_tasks: int,
     *,
@@ -44,7 +58,7 @@ def imap[T, U_contra, V_contra, W_contra](
 
 
 def imap[T](
-    inputs: Iterable[tuple],
+    inputs: Iterator[tuple],
     func: Callable[..., T],
     n_tasks: int,  # TODO: rename to n_workers
     *,
@@ -57,26 +71,15 @@ def imap[T](
     elif n_tasks < 0:
         n_tasks = os.cpu_count() or 1
 
-    tasks = deque[Future[T]]()
-    n_max_pending = n_tasks * prefetch_factor
     with ThreadPoolExecutor(n_tasks) as executor:
-        for data_in in inputs:
-            # clear out the task queue of completed tasks, then wait until there's room
-            while (tasks and tasks[0].done()) or len(tasks) > n_max_pending:
-                yield tasks.popleft().result()
-
-            task = executor.submit(func, *data_in)
-            tasks.append(task)
-
-        # wait for the remaining tasks to finish
-        while tasks:
-            yield tasks.popleft().result()
+        futs = (executor.submit(func, *data_in) for data_in in inputs)
+        yield from consume_futures(futs, n_tasks * prefetch_factor)
 
 
 # NOTE: didn't use TypeVarTuple because it isn't contravariant
 @overload
 def imap_multi_gpu[T, U_contra](
-    inputs: Iterable[tuple[U_contra]],
+    inputs: Iterator[tuple[U_contra]],
     func: Callable[[torch.device, U_contra], T],
     *,
     tasks_per_gpu: int = 1,
@@ -85,7 +88,7 @@ def imap_multi_gpu[T, U_contra](
 
 @overload
 def imap_multi_gpu[T, U_contra, V_contra](
-    inputs: Iterable[tuple[U_contra, V_contra]],
+    inputs: Iterator[tuple[U_contra, V_contra]],
     func: Callable[[torch.device, U_contra, V_contra], T],
     *,
     tasks_per_gpu: int = 1,
@@ -94,7 +97,7 @@ def imap_multi_gpu[T, U_contra, V_contra](
 
 @overload
 def imap_multi_gpu[T, U_contra, V_contra, W_contra](
-    inputs: Iterable[tuple[U_contra, V_contra, W_contra]],
+    inputs: Iterator[tuple[U_contra, V_contra, W_contra]],
     func: Callable[[torch.device, U_contra, V_contra, W_contra], T],
     *,
     tasks_per_gpu: int = 1,
@@ -102,7 +105,7 @@ def imap_multi_gpu[T, U_contra, V_contra, W_contra](
 
 
 def imap_multi_gpu[T](
-    inputs: Iterable[tuple],
+    inputs: Iterator[tuple],
     func: Callable[Concatenate[torch.device, ...], T],
     *,
     tasks_per_gpu: int = 1,

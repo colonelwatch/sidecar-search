@@ -1,6 +1,6 @@
 from itertools import batched, chain
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterator
 
 import torch
 from sentence_transformers import SentenceTransformer
@@ -10,7 +10,7 @@ from .encode import DocumentIdBatch, encode_pipelined
 
 
 def build_batched(
-    inputs: Iterable[DocumentIdBatch],
+    inputs: Iterator[DocumentIdBatch],
     model_factory: Callable[[], SentenceTransformer],
     db_path: Path,
     filter_tasks: int,
