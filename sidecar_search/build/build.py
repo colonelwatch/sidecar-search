@@ -1,6 +1,7 @@
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
+import torch
 from sentence_transformers import SentenceTransformer
 
 from .db import ParallelFilter, SharedConnection, insert_as_completed
@@ -9,7 +10,7 @@ from .encode import DocumentIdBatch, encode_pipelined
 
 def build_batched(
     inputs: Iterable[DocumentIdBatch],
-    model: SentenceTransformer,
+    model_factory: Callable[[], SentenceTransformer],
     db_path: Path,
     filter_tasks: int,
     encode_tasks: int,
@@ -23,6 +24,7 @@ def build_batched(
         batches = parallel_filter.filter(
             inputs, n_tasks=filter_tasks, progress=progress
         )
-        batches = encode_pipelined(batches, model, n_tasks=encode_tasks)
+        batches = encode_pipelined(batches, model_factory, tasks_per_gpu=encode_tasks)
 
-        insert_as_completed(batches, conn, n_tasks=encode_tasks)
+        insert_tasks = torch.cuda.device_count() * encode_tasks
+        insert_as_completed(batches, conn, n_tasks=insert_tasks)

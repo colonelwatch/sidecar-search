@@ -101,6 +101,8 @@ def imap[T](
 def imap_multi_gpu[T, U_contra](
     inputs: Iterable[tuple[U_contra]],
     func: Callable[[torch.device, U_contra], T],
+    *,
+    tasks_per_gpu: int = 1,
 ) -> Generator[T, None, None]: ...
 
 
@@ -108,6 +110,8 @@ def imap_multi_gpu[T, U_contra](
 def imap_multi_gpu[T, U_contra, V_contra](
     inputs: Iterable[tuple[U_contra, V_contra]],
     func: Callable[[torch.device, U_contra, V_contra], T],
+    *,
+    tasks_per_gpu: int = 1,
 ) -> Generator[T, None, None]: ...
 
 
@@ -115,18 +119,22 @@ def imap_multi_gpu[T, U_contra, V_contra](
 def imap_multi_gpu[T, U_contra, V_contra, W_contra](
     inputs: Iterable[tuple[U_contra, V_contra, W_contra]],
     func: Callable[[torch.device, U_contra, V_contra, W_contra], T],
+    *,
+    tasks_per_gpu: int = 1,
 ) -> Generator[T, None, None]: ...
 
 
 def imap_multi_gpu[T](
     inputs: Iterable[tuple],
     func: Callable[Concatenate[torch.device, ...], T],
+    *,
+    tasks_per_gpu: int = 1,
 ) -> Generator[T, None, None]:
     def func_with_gpu(device: torch.device, data_in: tuple) -> T:
         data_out = func(device, *data_in)
         return data_out
 
     n_gpus = torch.cuda.device_count()
+    n_tasks = n_gpus * tasks_per_gpu
     devices = cycle(torch.device(f"cuda:{i}") for i in range(n_gpus))
-    for data_out in imap(zip(devices, inputs), func_with_gpu, n_gpus):
-        yield data_out
+    yield from imap(zip(devices, inputs), func_with_gpu, n_tasks)

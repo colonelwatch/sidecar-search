@@ -4,11 +4,9 @@ from argparse import ArgumentParser
 from dataclasses import dataclass
 from itertools import batched
 from pathlib import Path
-from subprocess import PIPE, Popen
 from typing import BinaryIO, Iterable, Literal, cast
 
 import torch
-from filelock import FileLock
 from sentence_transformers import SentenceTransformer
 
 from sidecar_search.args import SharedArgsMixin
@@ -44,43 +42,11 @@ class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
 def get_model(
     model_name: str, bf16: bool, trust_remote_code: bool
 ) -> SentenceTransformer:
-    # start queries in parallel
-    p1 = Popen(
-        ["nvidia-smi", "--query-gpu=gpu_bus_id,index", "--format=csv,noheader"],
-        stdout=PIPE,
-    )
-    p2 = Popen(
-        ["nvidia-smi", "--query-compute-apps=gpu_bus_id,name", "--format=csv,noheader"],
-        stdout=PIPE,
-    )
-    assert p1.stdout is not None
-    assert p2.stdout is not None
-
-    # get "cuda:X" device indices for each GPU
-    bus_id_to_index: dict[str, int] = {}
-    with p1:
-        for line in p1.stdout:
-            gpu_bus_id, index = [v.strip() for v in line.decode().split(",")]
-            bus_id_to_index[gpu_bus_id] = int(index)
-
-    # get the processes on each "cuda:X" device
-    proc_count = [0] * len(bus_id_to_index)
-    with p2:
-        for line in p2.stdout:
-            gpu_bus_id, proc_name = [v.strip() for v in line.decode().split(",")]
-            if "python" in proc_name:
-                proc_count[bus_id_to_index[gpu_bus_id]] += 1
-
-    # Find the first device that isn't occupied by python then occupy it with the model
-    selected_index = min(range(len(proc_count)), key=(lambda i: proc_count[i]))
-    model = SentenceTransformer(
+    return SentenceTransformer(
         model_name,
-        device=f"cuda:{selected_index}",
         trust_remote_code=trust_remote_code,
         model_kwargs={"torch_dtype": torch.bfloat16 if bf16 else torch.float16},
     )
-
-    return model
 
 
 def _process_lines_batch(batch: Iterable[bytes]) -> DocumentIdBatch:
@@ -100,19 +66,14 @@ def iter_documents(batch_size: int) -> Iterable[DocumentIdBatch]:
 
 
 def build_main(args: BuildArgs) -> int:
-    # Get model with file lock to ensure next process will see this one
-    with FileLock("/tmp/abstracts-search-gpu.lock"):
-        model = get_model(MODEL, BF16, TRUST_REMOTE_CODE)
-
     batches = iter_documents(args.filter_batch_size)  # TODO: confusing naming
     build_batched(
         batches,
-        model,
+        lambda: get_model(MODEL, BF16, TRUST_REMOTE_CODE),
         args.data_path,
         args.filter_tasks,
         args.tasks,
         args.batch_size,
         progress=args.progress,
     )
-
     return 0

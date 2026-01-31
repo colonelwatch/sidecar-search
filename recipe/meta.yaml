@@ -22,7 +22,6 @@ requirements:
   run:
     - python
     - pytorch ~=2.6
-    - filelock
     - sentence-transformers ~=3.4
     - tqdm
     - numpy >=1.26.4
