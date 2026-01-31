@@ -54,12 +54,10 @@ class SharedConnection:
 
         return [id_ for (id_,) in res]
 
-    def insert_async(
-        self, oa_ids: Iterable[str], embeddings: Iterable[torch.Tensor]
-    ) -> Future[None]:
+    def insert_async(self, batch: DocumentEmbeddingBatch) -> Future[None]:
         def _insert() -> None:
             conn = self._ensure_conn()
-            insert_embeddings(oa_ids, embeddings, conn)
+            insert_embeddings(batch, conn)
             conn.commit()
 
         return self._worker.submit(_insert)
@@ -107,11 +105,11 @@ def insert_as_completed(
 ) -> None:
     pending: deque[Future[None]] = deque()
 
-    for ids_batch, embeddings_batch in batches:
+    for batch in batches:
         while (pending and pending[0].done()) or len(pending) > n_tasks:
             pending.popleft().result()
 
-        fut = conn.insert_async(ids_batch, embeddings_batch)
+        fut = conn.insert_async(batch)
         pending.append(fut)
 
     for fut in pending:

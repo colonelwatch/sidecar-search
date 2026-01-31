@@ -60,12 +60,12 @@ def query_bf16(conn: sqlite3.Connection) -> bool:
 
 
 def insert_embeddings(
-    oa_ids: Iterable[str], embeddings: Iterable[torch.Tensor], conn: sqlite3.Connection
+    pairs: Iterable[tuple[str, torch.Tensor]], conn: sqlite3.Connection
 ):
     conn.executemany(
         "INSERT INTO embeddings VALUES(?, ?) "
         "ON CONFLICT(id) DO UPDATE SET embedding=excluded.embedding",
-        zip(oa_ids, embeddings),
+        pairs,
     )
 
 

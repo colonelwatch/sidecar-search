@@ -62,4 +62,4 @@ def dump_dataset(
             if bf16:
                 embeddings = embeddings.bfloat16()
 
-            insert_embeddings(ids_list, embeddings, conn)
+            insert_embeddings(zip(ids_list, embeddings), conn)

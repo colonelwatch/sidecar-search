@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 from sidecar_search.utils.gpu_utils import imap_multi_gpu, iunsqueeze
 
 DocumentIdBatch = Sequence[tuple[str, str]]
-DocumentEmbeddingBatch = tuple[Sequence[str], torch.Tensor]  # TODO: also convert to AoS
+DocumentEmbeddingBatch = Sequence[tuple[str, torch.Tensor]]
 
 
 def get_model(
@@ -39,6 +39,15 @@ def encode_faster(
     return embeddings.cpu()
 
 
+def _transpose(batch: DocumentIdBatch) -> tuple[list[str], list[str]]:
+    ids: list[str] = []
+    documents: list[str] = []
+    for id_, document in batch:
+        ids.append(id_)
+        documents.append(document)
+    return ids, documents
+
+
 # TODO: make a class out of this
 def encode_pipelined(
     inputs: Iterable[DocumentIdBatch],
@@ -50,15 +59,10 @@ def encode_pipelined(
 
     def _encode(
         device: torch.device, batch: DocumentIdBatch
-    ) -> tuple[list[str], torch.Tensor]:
-        ids: list[str] = []
-        documents: list[str] = []
-        for id_, document in batch:
-            ids.append(id_)
-            documents.append(document)
-
+    ) -> list[tuple[str, torch.Tensor]]:
+        ids, documents = _transpose(batch)
         model = models[device.index]
-        return ids, encode_faster(model, documents)
+        return list(zip(ids, encode_faster(model, documents)))
 
     batches = iunsqueeze(inputs)
     yield from imap_multi_gpu(batches, _encode, tasks_per_gpu=tasks_per_gpu)
