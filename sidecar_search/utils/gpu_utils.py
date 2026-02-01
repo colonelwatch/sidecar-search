@@ -8,17 +8,20 @@ import torch
 
 
 def consume_futures[T](
-    futs: Iterator[Future[T]], n_tasks: int
+    futs: Iterator[Future[T]], max_pending: int, yield_timeout: float | None = None
 ) -> Generator[T, None, None]:
+    if max_pending < 0:
+        raise ValueError("max_pending must be >= 0")
+
     pending: deque[Future[T]] = deque()
 
     for fut in futs:
         pending.append(fut)
-        while (pending and pending[0].done()) or len(pending) > n_tasks:
-            yield pending.popleft().result()
+        while (pending and pending[0].done()) or len(pending) > max_pending:
+            yield pending.popleft().result(yield_timeout)
 
     for fut in pending:
-        yield fut.result()
+        yield fut.result(yield_timeout)
 
 
 def iunsqueeze[T](arg_iter: Iterator[T]) -> Iterator[tuple[T]]:
@@ -32,6 +35,7 @@ def imap[T, U_contra](
     inputs: Iterator[tuple[U_contra]],
     func: Callable[[U_contra], T],
     n_tasks: int,
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
@@ -42,6 +46,7 @@ def imap[T, U_contra, V_contra](
     inputs: Iterator[tuple[U_contra, V_contra]],
     func: Callable[[U_contra, V_contra], T],
     n_tasks: int,
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
@@ -52,6 +57,7 @@ def imap[T, U_contra, V_contra, W_contra](
     inputs: Iterator[tuple[U_contra, V_contra, W_contra]],
     func: Callable[[U_contra, V_contra, W_contra], T],
     n_tasks: int,
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
@@ -61,6 +67,7 @@ def imap[T](
     inputs: Iterator[tuple],
     func: Callable[..., T],
     n_tasks: int,  # TODO: rename to n_workers
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]:
@@ -73,7 +80,9 @@ def imap[T](
 
     with ThreadPoolExecutor(n_tasks) as executor:
         futs = (executor.submit(func, *data_in) for data_in in inputs)
-        yield from consume_futures(futs, n_tasks * prefetch_factor)
+        yield from consume_futures(
+            futs, n_tasks * prefetch_factor, yield_timeout=yield_timeout
+        )
 
 
 # NOTE: didn't use TypeVarTuple because it isn't contravariant
@@ -82,6 +91,7 @@ def imap_multi_gpu[T, U_contra](
     inputs: Iterator[tuple[U_contra]],
     func: Callable[[torch.device, U_contra], T],
     tasks_per_gpu: int = 1,
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
@@ -92,6 +102,7 @@ def imap_multi_gpu[T, U_contra, V_contra](
     inputs: Iterator[tuple[U_contra, V_contra]],
     func: Callable[[torch.device, U_contra, V_contra], T],
     tasks_per_gpu: int = 1,
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
@@ -102,6 +113,7 @@ def imap_multi_gpu[T, U_contra, V_contra, W_contra](
     inputs: Iterator[tuple[U_contra, V_contra, W_contra]],
     func: Callable[[torch.device, U_contra, V_contra, W_contra], T],
     tasks_per_gpu: int = 1,
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]: ...
@@ -111,6 +123,7 @@ def imap_multi_gpu[T](
     inputs: Iterator[tuple],
     func: Callable[Concatenate[torch.device, ...], T],
     tasks_per_gpu: int = 1,
+    yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
 ) -> Generator[T, None, None]:
@@ -122,5 +135,9 @@ def imap_multi_gpu[T](
     n_tasks = n_gpus * tasks_per_gpu
     devices = cycle(torch.device(f"cuda:{i}") for i in range(n_gpus))
     yield from imap(
-        zip(devices, inputs), func_with_gpu, n_tasks, prefetch_factor=prefetch_factor
+        zip(devices, inputs),
+        func_with_gpu,
+        n_tasks,
+        yield_timeout=yield_timeout,
+        prefetch_factor=prefetch_factor,
     )

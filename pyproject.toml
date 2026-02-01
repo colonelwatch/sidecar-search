@@ -48,6 +48,6 @@ sidecar-search = "sidecar_search.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["sidecar_search*"]
-exclude = []
+include = ["sidecar_search.*"]
+exclude = ["*.tests"]
 namespaces = false

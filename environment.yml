@@ -15,3 +15,5 @@ dependencies:
   # development only
   - pyarrow-stubs
   - pyright
+  - pytest
+  - coverage
