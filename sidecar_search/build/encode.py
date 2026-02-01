@@ -39,30 +39,38 @@ def encode_faster(
     return embeddings.cpu()
 
 
-def _transpose(batch: DocumentIdBatch) -> tuple[list[str], list[str]]:
-    ids: list[str] = []
-    documents: list[str] = []
-    for id_, document in batch:
-        ids.append(id_)
-        documents.append(document)
-    return ids, documents
+class PipelinedEncoder:
+    def __init__(
+        self,
+        model_factory: Callable[[], SentenceTransformer],
+        tasks_per_gpu: int = 1,
+    ) -> None:
+        self._models = [
+            model_factory().to(f"cuda:{i}") for i in range(torch.cuda.device_count())
+        ]
+        self._tasks_per_gpu = tasks_per_gpu
 
+    def encode(
+        self, batches: Iterator[DocumentIdBatch]
+    ) -> Generator[DocumentEmbeddingBatch, None, None]:
+        yield from imap_multi_gpu(
+            iunsqueeze(batches),
+            self._encode_batch,
+            tasks_per_gpu=self._tasks_per_gpu,
+        )
 
-# TODO: make a class out of this
-def encode_pipelined(
-    inputs: Iterator[DocumentIdBatch],
-    model_factory: Callable[[], SentenceTransformer],
-    *,
-    tasks_per_gpu: int = 1,
-) -> Generator[DocumentEmbeddingBatch, None, None]:
-    models = [model_factory().to(f"cuda:{i}") for i in range(torch.cuda.device_count())]
-
-    def _encode(
-        device: torch.device, batch: DocumentIdBatch
-    ) -> list[tuple[str, torch.Tensor]]:
-        ids, documents = _transpose(batch)
-        model = models[device.index]
+    def _encode_batch(
+        self, device: torch.device, batch: DocumentIdBatch
+    ) -> DocumentEmbeddingBatch:
+        ids, documents = self._transpose(batch)
+        model = self._models[device.index]
         return list(zip(ids, encode_faster(model, documents)))
 
-    batches = iunsqueeze(inputs)
-    yield from imap_multi_gpu(batches, _encode, tasks_per_gpu=tasks_per_gpu)
+    @staticmethod
+    def _transpose(batch: DocumentIdBatch) -> tuple[list[str], list[str]]:
+        ids: list[str] = []
+        documents: list[str] = []
+        for id_, document in batch:
+            ids.append(id_)
+            documents.append(document)
+        return ids, documents
