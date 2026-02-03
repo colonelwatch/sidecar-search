@@ -3,7 +3,7 @@ from typing import Callable, Generator, Iterator, Sequence
 import torch
 from sentence_transformers import SentenceTransformer
 
-from sidecar_search.utils.gpu_utils import imap_multi_gpu, iunsqueeze
+from sidecar_search.utils.gpu_utils import imap_multi_gpu
 
 DocumentIdBatch = Sequence[tuple[str, str]]
 DocumentEmbeddingBatch = Sequence[tuple[str, torch.Tensor]]
@@ -54,9 +54,7 @@ class PipelinedEncoder:
         self, batches: Iterator[DocumentIdBatch]
     ) -> Generator[DocumentEmbeddingBatch, None, None]:
         yield from imap_multi_gpu(
-            iunsqueeze(batches),
-            self._encode_batch,
-            tasks_per_gpu=self._tasks_per_gpu,
+            zip(batches), self._encode_batch, tasks_per_gpu=self._tasks_per_gpu
         )
 
     def _encode_batch(

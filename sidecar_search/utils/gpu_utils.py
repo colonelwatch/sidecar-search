@@ -24,11 +24,6 @@ def consume_futures[T](
         yield fut.result(yield_timeout)
 
 
-def iunsqueeze[T](arg_iter: Iterator[T]) -> Iterator[tuple[T]]:
-    for arg in arg_iter:
-        yield (arg,)
-
-
 # NOTE: didn't use TypeVarTuple because it isn't contravariant
 @overload
 def imap[T, U_contra](
@@ -131,7 +126,11 @@ def imap_multi_gpu[T](
         data_out = func(device, *data_in)
         return data_out
 
+    # TODO: think about how to extend this project to CPU-only
     n_gpus = torch.cuda.device_count()
+    if n_gpus == 0:
+        raise NotImplementedError("CPU-only is currently not handled")
+
     n_tasks = n_gpus * tasks_per_gpu
     devices = cycle(torch.device(f"cuda:{i}") for i in range(n_gpus))
     yield from imap(

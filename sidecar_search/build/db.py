@@ -6,7 +6,7 @@ from typing import Generator, Iterator, Self
 import torch
 from tqdm import tqdm
 
-from sidecar_search.utils.gpu_utils import consume_futures, imap, iunsqueeze
+from sidecar_search.utils.gpu_utils import consume_futures, imap
 from sidecar_search.utils.table_utils import insert_embeddings, to_sql_binary
 
 from .encode import DocumentEmbeddingBatch, DocumentIdBatch
@@ -73,15 +73,14 @@ class ParallelFilter:
 
     def filter(
         self,
-        inputs: Iterator[DocumentIdBatch],
+        batches: Iterator[DocumentIdBatch],
         n_tasks: int = 0,
         progress: bool = False,
     ) -> Generator[DocumentIdBatch, None, None]:
         if progress:
             self._counter = tqdm()
 
-        batches = iunsqueeze(inputs)
-        yield from imap(batches, self._filt, n_tasks)
+        yield from imap(zip(batches), self._filt, n_tasks)
 
         if self._counter is not None:
             self._counter.close()

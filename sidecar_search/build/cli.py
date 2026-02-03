@@ -9,7 +9,7 @@ from typing import BinaryIO, Iterator, Literal, Sequence, cast
 from sidecar_search.args import SharedArgsMixin
 from sidecar_search.args_base import CommandArgsBase
 from sidecar_search.utils.env_utils import BF16, MODEL, TRUST_REMOTE_CODE
-from sidecar_search.utils.gpu_utils import imap, iunsqueeze
+from sidecar_search.utils.gpu_utils import imap
 
 from .build import build_batched
 from .encode import DocumentIdBatch, get_model
@@ -46,8 +46,8 @@ def _process_lines_batch(lines: Sequence[bytes]) -> DocumentIdBatch:
 
 def iter_documents(batch_size: int) -> Iterator[DocumentIdBatch]:
     stdin_cast = cast(BinaryIO, sys.stdin.buffer)
-    inputs = iunsqueeze(batched(stdin_cast, batch_size))
-    return imap(inputs, _process_lines_batch, 1, prefetch_factor=3)
+    batches = zip(batched(stdin_cast, batch_size))
+    return imap(batches, _process_lines_batch, 1, prefetch_factor=3)
 
 
 def build_main(args: BuildArgs) -> int:
