@@ -19,6 +19,18 @@ class TestConsumeFutures:
         with pytest.raises(TimeoutError):
             _ = list(consume_futures(futs, 10, yield_timeout=0))
 
+    def test_backpressure(self) -> None:
+        fut_0: Future[Never] = Future()
+        fut_1: Future[Never] = Future()
+        futs = iter((fut_0, fut_1))
+
+        try:
+            _ = list(consume_futures(futs, 0, yield_timeout=0))
+        except TimeoutError:
+            pass
+
+        assert next(futs) is fut_1
+
     def test_yield_order(self) -> None:
         fut_0: Future[int] = Future()
         fut_1: Future[int] = Future()
