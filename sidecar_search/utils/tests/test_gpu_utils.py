@@ -1,23 +1,21 @@
 from concurrent.futures import Future
+from itertools import count
+from threading import Event
 from typing import Generator, Iterator, Never
 
 import pytest
 
-from sidecar_search.utils.gpu_utils import consume_futures
+from sidecar_search.utils.gpu_utils import consume_futures, imap
 
 
 class TestConsumeFutures:
-    def test_blocking(self) -> None:
+    # NOTE: max_pending = 1 tests exhausting futs iterator before blocking
+    @pytest.mark.parametrize("max_pending", [0, 1])
+    def test_blocking(self, max_pending: int) -> None:
         fut: Future[Never] = Future()
         futs = iter((fut,))
         with pytest.raises(TimeoutError):
-            _ = list(consume_futures(futs, 0, yield_timeout=0))
-
-    def test_blocking_after_exhaustion(self) -> None:
-        fut: Future[Never] = Future()
-        futs = iter((fut,))
-        with pytest.raises(TimeoutError):
-            _ = list(consume_futures(futs, 10, yield_timeout=0))
+            _ = list(consume_futures(futs, max_pending, yield_timeout=0))
 
     def test_backpressure(self) -> None:
         fut_0: Future[Never] = Future()
@@ -67,3 +65,94 @@ class TestConsumeFutures:
     def test_empty_iterator(self) -> None:
         futs: Iterator[Future] = iter(tuple())
         assert list(consume_futures(futs, 0)) == []
+
+
+class TestImapParallel:
+    def test_map(self) -> None:
+        def double(x: int) -> int:
+            return x * 2
+
+        vals = range(10)
+        results_iter = imap(zip(vals), double, 2)
+        assert list(map(double, vals)) == list(results_iter)
+
+    def test_order(self) -> None:
+        event = Event()
+
+        def on_done(fut: Future) -> None:
+            if fut.result() == 1:
+                event.set()
+
+        def func(i: int) -> int:
+            if i == 0:
+                event.wait()
+            return i
+
+        vals = range(2)
+        assert list(imap(zip(vals), func, 2, on_done=on_done)) == [0, 1]
+
+
+@pytest.mark.parametrize("n_tasks", [0, 1])
+class TestImapConcurrent:
+    def test_blocking(self, n_tasks: int) -> None:
+        evt = Event()
+
+        with pytest.raises(TimeoutError):
+            vals = range(10)
+            results_iter = imap(
+                zip(vals),
+                lambda _: evt.wait(),
+                n_tasks,
+                yield_timeout=0,
+                on_break=(lambda _: evt.set()),
+            )
+            _ = list(results_iter)
+
+    @pytest.mark.parametrize("prefetch_factor", [1, 2])
+    def test_backpressure(self, n_tasks: int, prefetch_factor: int) -> None:
+        evt = Event()
+
+        vals_iter = count()
+        try:
+            results_iter = imap(
+                zip(vals_iter),
+                lambda _: evt.wait(),
+                n_tasks,
+                yield_timeout=0,
+                prefetch_factor=prefetch_factor,
+                on_break=(lambda _: evt.set()),
+            )
+            _ = list(results_iter)
+        except TimeoutError:
+            pass
+
+        assert next(vals_iter) == n_tasks * prefetch_factor + 1
+
+    def test_on_break(self, n_tasks: int) -> None:
+        exc = Exception()
+        passed: Exception | BaseException | None = None
+        raised: Exception | BaseException | None = None
+
+        def raise_exc(_) -> None:
+            raise exc
+
+        def on_break(e: Exception | BaseException) -> None:
+            nonlocal passed
+            passed = e
+
+        vals = range(10)
+        try:
+            _ = list(imap(zip(vals), raise_exc, n_tasks, on_break=on_break))
+        except Exception as e:
+            raised = e
+
+        assert exc is passed and exc is raised
+
+    def test_raise_on_nonpositive_prefetch_factor(self, n_tasks: int):
+        with pytest.raises(ValueError):
+            vals = range(10)
+            _ = list(imap(zip(vals), lambda x: x, n_tasks, prefetch_factor=-1))
+
+    def test_empty_iterator(self, n_tasks: int) -> None:
+        vals = iter(tuple())
+        assert list(imap(zip(vals), lambda x: x, n_tasks)) == []

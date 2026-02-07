@@ -2,7 +2,7 @@ import os
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from itertools import cycle
-from typing import Callable, Concatenate, Generator, Iterator, overload
+from typing import Any, Callable, Concatenate, Generator, Iterator, overload
 
 import torch
 
@@ -33,6 +33,8 @@ def imap[T, U_contra](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
 
 
@@ -44,6 +46,8 @@ def imap[T, U_contra, V_contra](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
 
 
@@ -55,6 +59,8 @@ def imap[T, U_contra, V_contra, W_contra](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
 
 
@@ -65,19 +71,34 @@ def imap[T](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]:
-    if n_tasks == 0:
-        for data_in in inputs:
-            yield func(*data_in)
-        return
-    elif n_tasks < 0:
+    if prefetch_factor <= 0:
+        raise ValueError("invalid prefetch_factor")
+
+    if n_tasks < 0:
         n_tasks = os.cpu_count() or 1
 
-    with ThreadPoolExecutor(n_tasks) as executor:
-        futs = (executor.submit(func, *data_in) for data_in in inputs)
-        yield from consume_futures(
-            futs, n_tasks * prefetch_factor, yield_timeout=yield_timeout
-        )
+    with ThreadPoolExecutor(n_tasks or 1) as executor:
+
+        def submit[**P](
+            func: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+        ) -> Future[T]:
+            fut = executor.submit(func, *args, **kwargs)
+            if on_done:
+                fut.add_done_callback(on_done)
+            return fut
+
+        try:
+            futs = (submit(func, *data_in) for data_in in inputs)
+            yield from consume_futures(
+                futs, n_tasks * prefetch_factor, yield_timeout=yield_timeout
+            )
+        except (Exception, BaseException) as e:
+            if on_break:
+                on_break(e)
+            raise
 
 
 # NOTE: didn't use TypeVarTuple because it isn't contravariant
@@ -89,6 +110,8 @@ def imap_multi_gpu[T, U_contra](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
 
 
@@ -100,6 +123,8 @@ def imap_multi_gpu[T, U_contra, V_contra](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
 
 
@@ -111,6 +136,8 @@ def imap_multi_gpu[T, U_contra, V_contra, W_contra](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
 
 
@@ -121,6 +148,8 @@ def imap_multi_gpu[T](
     yield_timeout: float | None = None,
     *,
     prefetch_factor: int = 2,
+    on_done: Callable[[Future], Any] | None = None,
+    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]:
     def func_with_gpu(device: torch.device, data_in: tuple) -> T:
         data_out = func(device, *data_in)
@@ -139,4 +168,6 @@ def imap_multi_gpu[T](
         n_tasks,
         yield_timeout=yield_timeout,
         prefetch_factor=prefetch_factor,
+        on_done=on_done,
+        on_break=on_break,
     )
