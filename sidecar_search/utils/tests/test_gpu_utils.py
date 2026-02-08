@@ -4,6 +4,7 @@ from threading import Event
 from typing import Generator, Iterator, Never
 
 import pytest
+import torch
 
 from sidecar_search.utils.gpu_utils import consume_futures, imap
 
@@ -148,7 +149,7 @@ class TestImapConcurrent:
 
         assert exc is passed and exc is raised
 
-    def test_raise_on_nonpositive_prefetch_factor(self, n_tasks: int):
+    def test_raise_on_nonpositive_prefetch_factor(self, n_tasks: int) -> None:
         with pytest.raises(ValueError):
             vals = range(10)
             _ = list(imap(zip(vals), lambda x: x, n_tasks, prefetch_factor=-1))
@@ -156,3 +157,8 @@ class TestImapConcurrent:
     def test_empty_iterator(self, n_tasks: int) -> None:
         vals = iter(tuple())
         assert list(imap(zip(vals), lambda x: x, n_tasks)) == []
+
+
+@pytest.mark.skipif(torch.cuda.device_count() == 0, "CPU-only is currently not handled")
+class TestImapMultiGpu:
+    def test_args_passed(self) -> None:
