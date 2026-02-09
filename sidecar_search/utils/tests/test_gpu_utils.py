@@ -1,12 +1,13 @@
 from concurrent.futures import Future
-from itertools import count
+from itertools import count, cycle
 from threading import Event
-from typing import Generator, Iterator, Never
+from typing import Any, Callable, Generator, Iterator, Never, TypedDict
+from unittest.mock import MagicMock
 
 import pytest
 import torch
 
-from sidecar_search.utils.gpu_utils import consume_futures, imap
+from sidecar_search.utils.gpu_utils import consume_futures, imap, imap_multi_gpu
 
 
 class TestConsumeFutures:
@@ -159,6 +160,70 @@ class TestImapConcurrent:
         assert list(imap(zip(vals), lambda x: x, n_tasks)) == []
 
 
-@pytest.mark.skipif(torch.cuda.device_count() == 0, "CPU-only is currently not handled")
+class MockTorchDevice:
+    def __init__(self, device: str) -> None:
+        type_, index_str = device.split(":", maxsplit=2)
+        self.type = type_
+        self.index = int(index_str)
+
+
+@pytest.fixture
+def mock_imap(monkeypatch: pytest.MonkeyPatch) -> Generator[MagicMock, None, None]:
+    mock_imap = MagicMock(spec=imap)
+    mock_imap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
+    with monkeypatch.context():
+        monkeypatch.setattr("sidecar_search.utils.gpu_utils.imap", mock_imap)
+        yield mock_imap
+
+
+# NOTE: these are kw-only arguments, which don't require manual resolution
+class ExpectedImapKwargs(TypedDict):
+    yield_timeout: float | None
+    prefetch_factor: int
+    on_done: Callable[[Future], Any] | None
+    on_break: Callable[[Exception | BaseException], Any] | None
+
+
 class TestImapMultiGpu:
-    def test_args_passed(self) -> None:
+    @pytest.fixture(autouse=True)
+    def mock_gpu_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("torch.cuda.device_count", lambda: 4)
+        monkeypatch.setattr("torch.device", MockTorchDevice)
+
+    def test_args_concatenate(self) -> None:
+        vals = range(10)
+        idxs = cycle(range(torch.cuda.device_count()))
+
+        def combine(device: torch.device, value: int) -> tuple[int, int]:
+            return (device.index, value)
+
+        results = list(imap_multi_gpu(zip(vals), combine))
+        expecteds = list(zip(idxs, vals))
+        assert results == expecteds
+
+    def test_tasks_arg_passed(self, mock_imap: MagicMock) -> None:
+        vals = range(10)
+        n_tasks_per_gpu = 2
+        _ = list(imap_multi_gpu(zip(vals), (lambda _, x: x), n_tasks_per_gpu))
+
+        mock_imap.assert_called_once()
+
+        try:
+            n_tasks = mock_imap.call_args.kwargs["n_tasks"]
+        except KeyError:
+            n_tasks = mock_imap.call_args.args[2]
+
+        assert n_tasks_per_gpu * torch.cuda.device_count() == n_tasks
+
+    def test_kwargs_passed(self, mock_imap: MagicMock) -> None:
+        vals = range(10)
+        my_kwargs = ExpectedImapKwargs(
+            yield_timeout=10,
+            prefetch_factor=3,
+            on_done=(lambda _: None),
+            on_break=(lambda _: None),
+        )
+        _ = list(imap_multi_gpu(zip(vals), lambda _, x: x, **my_kwargs))
+
+        mock_imap.assert_called_once()
+        assert mock_imap.call_args.kwargs == my_kwargs
