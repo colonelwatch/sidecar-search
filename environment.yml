@@ -16,4 +16,4 @@ dependencies:
   - pyarrow-stubs
   - pyright
   - pytest
-  - coverage
+  - coverage[toml]
