@@ -1,8 +1,8 @@
 from concurrent.futures import Future
 from itertools import count, cycle
 from threading import Event
-from typing import Any, Callable, Generator, Iterator, Never, TypedDict
-from unittest.mock import MagicMock
+from typing import Any, Callable, Generator, Iterator, Never, TypedDict, cast
+from unittest.mock import ANY, MagicMock, create_autospec
 
 import pytest
 import torch
@@ -169,7 +169,7 @@ class MockTorchDevice:
 
 @pytest.fixture
 def mock_imap(monkeypatch: pytest.MonkeyPatch) -> Generator[MagicMock, None, None]:
-    mock_imap = MagicMock(spec=imap)
+    mock_imap = cast(MagicMock, create_autospec(spec=imap))  # duck-typing as MagicMock
     mock_imap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
     with monkeypatch.context():
         monkeypatch.setattr("sidecar_search.utils.gpu_utils.imap", mock_imap)
@@ -224,6 +224,4 @@ class TestImapMultiGpu:
             on_break=(lambda _: None),
         )
         _ = list(imap_multi_gpu(zip(vals), lambda _, x: x, **my_kwargs))
-
-        mock_imap.assert_called_once()
-        assert mock_imap.call_args.kwargs == my_kwargs
+        mock_imap.assert_called_once_with(ANY, ANY, ANY, **my_kwargs)
