@@ -161,12 +161,11 @@ class TestImapConcurrent:
 
 
 @pytest.fixture
-def mock_imap(monkeypatch: pytest.MonkeyPatch) -> Generator[MagicMock, None, None]:
+def mock_imap(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     mock_imap = cast(MagicMock, create_autospec(spec=imap))  # duck-typing as MagicMock
     mock_imap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
-    with monkeypatch.context():
-        monkeypatch.setattr("sidecar_search.utils.gpu_utils.imap", mock_imap)
-        yield mock_imap
+    monkeypatch.setattr("sidecar_search.utils.gpu_utils.imap", mock_imap)
+    return mock_imap
 
 
 # NOTE: these are kw-only arguments, which don't require manual resolution
