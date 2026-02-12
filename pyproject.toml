@@ -49,9 +49,9 @@ sidecar-search = "sidecar_search.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sidecar_search.*"]
-exclude = ["*.tests"]
+exclude = ["*.tests", "sidecar_search.conftest"]
 namespaces = false
 
 [tool.coverage.run]
 source = ["sidecar_search"]
-omit = ["*/tests/*"]
+omit = ["*/tests/*", "sidecar_search/conftest.py"]

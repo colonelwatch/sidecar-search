@@ -160,13 +160,6 @@ class TestImapConcurrent:
         assert list(imap(zip(vals), lambda x: x, n_tasks)) == []
 
 
-class MockTorchDevice:
-    def __init__(self, device: str) -> None:
-        type_, index_str = device.split(":", maxsplit=2)
-        self.type = type_
-        self.index = int(index_str)
-
-
 @pytest.fixture
 def mock_imap(monkeypatch: pytest.MonkeyPatch) -> Generator[MagicMock, None, None]:
     mock_imap = cast(MagicMock, create_autospec(spec=imap))  # duck-typing as MagicMock
@@ -184,12 +177,8 @@ class ExpectedImapKwargs(TypedDict):
     on_break: Callable[[Exception | BaseException], Any] | None
 
 
+@pytest.mark.usefixtures("mock_gpu_env")
 class TestImapMultiGpu:
-    @pytest.fixture(autouse=True)
-    def mock_gpu_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("torch.cuda.device_count", lambda: 4)
-        monkeypatch.setattr("torch.device", MockTorchDevice)
-
     def test_args_concatenate(self) -> None:
         vals = range(10)
         idxs = cycle(range(torch.cuda.device_count()))
