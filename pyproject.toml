@@ -52,6 +52,12 @@ include = ["sidecar_search.*"]
 exclude = ["*.tests", "sidecar_search.conftest"]
 namespaces = false
 
+[tool.pytest]
+minversion = "9.0"  # pytest <9.0 _will not_ parse tool.pytest!
+norecursedirs = [  # removes "build" from norecursedirs defaults
+	"*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"
+]
+
 [tool.coverage.run]
 source = ["sidecar_search"]
 omit = ["*/tests/*", "sidecar_search/conftest.py"]
