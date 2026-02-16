@@ -55,8 +55,13 @@ class SharedConnection:
     def insert_async(self, batch: DocumentEmbeddingBatch) -> Future[None]:
         def _insert() -> None:
             conn = self._ensure_conn()
-            insert_embeddings(batch, conn)
-            conn.commit()
+            try:
+                insert_embeddings(batch, conn)
+            except BaseException:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
 
         return self._worker.submit(_insert)
 
