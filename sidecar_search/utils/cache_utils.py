@@ -9,36 +9,58 @@ from datasets.config import HF_DATASETS_CACHE
 
 from .env_utils import CACHE
 
-_cache_dir: Path = CACHE
-_tmpdir: TemporaryDirectory | None = None
-_lock = Lock()
+
+class PersistentCache:
+    def __init__(self, cache_dir_path: Path) -> None:
+        self._cache_dir_path = cache_dir_path
+        self._temp_dir: TemporaryDirectory | None = None
+
+        self._lock = Lock()
+        self._dir_path = cache_dir_path
+
+    def get(self) -> Path:
+        with self._lock:
+            return self._get_nolock()
+
+    def seal(self) -> None:
+        with self._lock:
+            # replace with a TemporaryDirectory (cleanup upon interpreter exit)
+            dir_path = self._get_nolock()
+            if dir_path != self._cache_dir_path:
+                return
+            temp_dir = TemporaryDirectory(dir=str(dir_path))
+
+            self._temp_dir = temp_dir
+            self._dir_path = Path(temp_dir.name)
+
+    def clean(self) -> None:
+        with self._lock:
+            cache_dir_path = self._cache_dir_path
+            if cache_dir_path != self._dir_path:
+                raise RuntimeError("Cleaned persistent cache after sealing it")
+            if not cache_dir_path.exists():
+                return
+            rmtree(cache_dir_path)
+
+    def _get_nolock(self) -> Path:
+        dir_path = self._dir_path
+        dir_path.mkdir(parents=True, exist_ok=True)
+        return dir_path
 
 
-def _get_cache_dir_nolock() -> Path:
-    _cache_dir.mkdir(parents=True, exist_ok=True)
-    return _cache_dir
+cache = PersistentCache(CACHE)
 
 
 def get_cache_dir() -> Path:
-    with _lock:
-        return _get_cache_dir_nolock()
+    return cache.get()
 
 
 def seal_persistent_cache() -> None:
-    global _tmpdir, _cache_dir
-    with _lock:
-        # replace with a TemporaryDirectory (cleanup upon interpreter exit)
-        cache_dir = _get_cache_dir_nolock()
-        if cache_dir != CACHE:
-            return
-        _tmpdir = TemporaryDirectory(dir=str(cache_dir))
-        _cache_dir = Path(_tmpdir.name)
+    cache.seal()
 
 
 def clean_persistent_cache() -> None:
-    if not CACHE.exists():
-        return
-    rmtree(CACHE)
+    cache.clean()
 
 
 def seal_hf_cache() -> None:
