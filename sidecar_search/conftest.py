@@ -1,7 +1,8 @@
 import pytest
+import torch.cuda
 
 
 @pytest.fixture()
 def mock_gpu_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("torch.cuda.device_count", lambda: 4)
-    monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 4)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)

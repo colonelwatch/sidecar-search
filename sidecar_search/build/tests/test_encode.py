@@ -6,8 +6,10 @@ import pytest
 import torch
 from sentence_transformers import SentenceTransformer
 
-from sidecar_search.build.encode import PipelinedEncoder, encode_faster, get_model
 from sidecar_search.utils.gpu_utils import imap_multi_gpu
+
+from .. import encode
+from ..encode import PipelinedEncoder, encode_faster, get_model
 
 EMBEDDING_KEY = "sentence_embedding"
 
@@ -17,7 +19,7 @@ def test_get_model(monkeypatch: pytest.MonkeyPatch, bf16: bool) -> None:
     mock_cls: MagicMock = create_autospec(  # duck-typing as MagicMock
         spec=SentenceTransformer
     )
-    monkeypatch.setattr("sidecar_search.build.encode.SentenceTransformer", mock_cls)
+    monkeypatch.setattr(encode, "SentenceTransformer", mock_cls)
 
     model_name = "asdfgh"
     trust_remote_code = True
@@ -70,7 +72,7 @@ class TestPipelinedEncoder:
             MagicMock, create_autospec(spec=imap_multi_gpu)
         )
         mock_imap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
-        monkeypatch.setattr("sidecar_search.build.encode.imap_multi_gpu", mock_imap)
+        monkeypatch.setattr(encode, "imap_multi_gpu", mock_imap)
 
         tasks_per_gpu = 10
         encoder = PipelinedEncoder(make_mock_model, tasks_per_gpu=tasks_per_gpu)

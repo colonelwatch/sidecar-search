@@ -7,7 +7,8 @@ from unittest.mock import ANY, MagicMock, create_autospec
 import pytest
 import torch
 
-from sidecar_search.utils.gpu_utils import consume_futures, imap, imap_multi_gpu
+from .. import gpu_utils
+from ..gpu_utils import consume_futures, imap, imap_multi_gpu
 
 
 class TestConsumeFutures:
@@ -164,7 +165,7 @@ class TestImapConcurrent:
 def mock_imap(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     mock_imap = cast(MagicMock, create_autospec(spec=imap))  # duck-typing as MagicMock
     mock_imap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
-    monkeypatch.setattr("sidecar_search.utils.gpu_utils.imap", mock_imap)
+    monkeypatch.setattr(gpu_utils, "imap", mock_imap)
     return mock_imap
 
 

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from .. import cache_utils
 from ..cache_utils import (
     PersistentCache,
     clean_persistent_cache,
@@ -85,7 +86,7 @@ def test_get_cache_dir(monkeypatch: pytest.MonkeyPatch):
     path_mock = MagicMock()
     mock = MagicMock()
     mock.get.return_value = path_mock
-    monkeypatch.setattr("sidecar_search.utils.cache_utils.cache", mock)
+    monkeypatch.setattr(cache_utils, "cache", mock)
 
     ret = get_cache_dir()
 
@@ -95,13 +96,13 @@ def test_get_cache_dir(monkeypatch: pytest.MonkeyPatch):
 
 def test_seal_persistence_cache(monkeypatch: pytest.MonkeyPatch):
     mock = MagicMock()
-    monkeypatch.setattr("sidecar_search.utils.cache_utils.cache", mock)
+    monkeypatch.setattr(cache_utils, "cache", mock)
     seal_persistent_cache()
     mock.seal.assert_called_once()
 
 
 def test_clean_persistence_cache(monkeypatch: pytest.MonkeyPatch):
     mock = MagicMock()
-    monkeypatch.setattr("sidecar_search.utils.cache_utils.cache", mock)
+    monkeypatch.setattr(cache_utils, "cache", mock)
     clean_persistent_cache()
     mock.clean.assert_called_once()
