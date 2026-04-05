@@ -10,7 +10,7 @@ BATCH_SIZE = 1024
 
 
 def load_dataset(dir: Path) -> Dataset:
-    paths = [str(path) for path in dir.glob("*.parquet")]
+    paths = [str(path) for path in sorted(dir.glob("*.parquet"))]
     if not paths:  # schema inference is impossible without at least one file
         raise ValueError("must pass folder with at least one parquet file")
 
