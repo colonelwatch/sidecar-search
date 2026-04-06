@@ -11,7 +11,7 @@ from sidecar_search.utils.gpu_utils import imap_multi_gpu
 from .. import encode
 from ..encode import PipelinedEncoder, encode_faster, get_model
 
-EMBEDDING_KEY = "sentence_embedding"
+EMBEDDING_KEY = "sentence_embedding"  # from SentenceTransformer `.encode`
 
 
 @pytest.mark.parametrize("bf16", (True, False))
@@ -62,7 +62,7 @@ def test_encode_faster() -> None:
 
     mock_model.tokenize.assert_called_once_with(sentences)
     mock_model.forward.assert_called_once_with(features)
-    assert torch.equal(results, embeddings["sentence_embedding"])
+    assert torch.equal(results, embeddings[EMBEDDING_KEY])
 
 
 @pytest.mark.usefixtures("mock_gpu_env")
