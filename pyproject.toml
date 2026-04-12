@@ -48,8 +48,8 @@ sidecar-search = "sidecar_search.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["sidecar_search.*"]
-exclude = ["*.tests", "sidecar_search.conftest"]
+include = ["sidecar_search", "sidecar_search.*"]
+exclude = ["*.tests", "*.conftest"]
 namespaces = false
 
 [tool.pytest]
@@ -60,4 +60,4 @@ norecursedirs = [  # removes "build" from norecursedirs defaults
 
 [tool.coverage.run]
 source = ["sidecar_search"]
-omit = ["*/tests/*", "sidecar_search/conftest.py"]
+omit = ["*/tests/*", "*/conftest.py"]
