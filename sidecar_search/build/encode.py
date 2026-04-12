@@ -1,12 +1,22 @@
-from typing import Generator, Iterable
+from typing import Callable, Generator, Iterator, Sequence
 
 import torch
 from sentence_transformers import SentenceTransformer
 
-from sidecar_search.utils.gpu_utils import imap, iunsqueeze, iunzip
+from sidecar_search.utils.gpu_utils import imap_multi_gpu
 
-DocumentIdBatch = tuple[list[str], list[str]]
-DocumentEmbeddingBatch = tuple[list[str], torch.Tensor]
+DocumentIdBatch = Sequence[tuple[str, str]]
+DocumentEmbeddingBatch = Sequence[tuple[str, torch.Tensor]]
+
+
+def get_model(
+    model_name: str, bf16: bool, trust_remote_code: bool
+) -> SentenceTransformer:
+    return SentenceTransformer(
+        model_name,
+        trust_remote_code=trust_remote_code,
+        model_kwargs={"torch_dtype": torch.bfloat16 if bf16 else torch.float16},
+    )
 
 
 # built from SentenceTransformer.encode but with non-blocking CPU-to-GPU transfers
@@ -29,16 +39,36 @@ def encode_faster(
     return embeddings.cpu()
 
 
-def encode_pipelined(
-    batches: Iterable[DocumentIdBatch],
-    model: SentenceTransformer,
-    n_tasks: int,
-) -> Generator[DocumentEmbeddingBatch, None, None]:
-    ids_batches, documents_batches = iunzip(batches, 2)
-    documents_batches = iunsqueeze(documents_batches)
-    embeddings_batches = imap(
-        documents_batches, lambda x: encode_faster(model, x), n_tasks
-    )
-    batches_out = zip(ids_batches, embeddings_batches)
-    for ids_batch, embeddings_batch in batches_out:
-        yield ids_batch, embeddings_batch
+class PipelinedEncoder:
+    def __init__(
+        self,
+        model_factory: Callable[[], SentenceTransformer],
+        tasks_per_gpu: int = 1,
+    ) -> None:
+        self._models = [
+            model_factory().to(f"cuda:{i}") for i in range(torch.cuda.device_count())
+        ]
+        self._tasks_per_gpu = tasks_per_gpu
+
+    def encode(
+        self, batches: Iterator[DocumentIdBatch]
+    ) -> Generator[DocumentEmbeddingBatch, None, None]:
+        yield from imap_multi_gpu(
+            zip(batches), self._encode_batch, tasks_per_gpu=self._tasks_per_gpu
+        )
+
+    def _encode_batch(
+        self, device: torch.device, batch: DocumentIdBatch
+    ) -> DocumentEmbeddingBatch:
+        ids, documents = self._transpose(batch)
+        model = self._models[device.index]
+        return list(zip(ids, encode_faster(model, documents)))
+
+    @staticmethod
+    def _transpose(batch: DocumentIdBatch) -> tuple[list[str], list[str]]:
+        ids: list[str] = []
+        documents: list[str] = []
+        for id_, document in batch:
+            ids.append(id_)
+            documents.append(document)
+        return ids, documents

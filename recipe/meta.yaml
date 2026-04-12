@@ -1,6 +1,6 @@
 package:
   name: sidecar-search
-  version: "0.1.0"
+  version: "0.2.0"
 
 source:
   path: ../
@@ -22,7 +22,6 @@ requirements:
   run:
     - python
     - pytorch ~=2.6
-    - filelock
     - sentence-transformers ~=3.4
     - tqdm
     - numpy >=1.26.4

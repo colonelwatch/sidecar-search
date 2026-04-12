@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sidecar-search"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
 	{name = "Kenny Peng", email = "knypng44@gmail.com"}
 ]
@@ -28,7 +28,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
 	"torch~=2.6",
-	"filelock",
 	"sentence-transformers~=3.4",
 	"tqdm",
 	"numpy>=1.26.4",
@@ -49,6 +48,16 @@ sidecar-search = "sidecar_search.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["sidecar_search*"]
-exclude = []
+include = ["sidecar_search.*"]
+exclude = ["*.tests", "sidecar_search.conftest"]
 namespaces = false
+
+[tool.pytest]
+minversion = "9.0"  # pytest <9.0 _will not_ parse tool.pytest!
+norecursedirs = [  # removes "build" from norecursedirs defaults
+	"*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"
+]
+
+[tool.coverage.run]
+source = ["sidecar_search"]
+omit = ["*/tests/*", "sidecar_search/conftest.py"]

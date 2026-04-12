@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict, Unpack
@@ -9,7 +10,7 @@ from faiss.contrib.ondisk import merge_ondisk
 from tqdm import tqdm
 
 from sidecar_search.utils.contextmanager_utils import del_on_exc
-from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu, iunsqueeze
+from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu
 
 from .provisioner import Provisioner
 from .utils.datasets_utils import iter_tensors
@@ -61,7 +62,10 @@ class MakeIndexBuilder:
         try:
             n_full = len(self._dataset)
             n = n_full if self._holdouts is None else n_full - len(self._holdouts)
-            with tqdm(desc="make_index", total=n, disable=(not progress)) as c:
+            with (
+                tqdm(desc="make_index", total=n, disable=(not progress)) as c,
+                ThreadPoolExecutor() as executor,
+            ):
                 for i_shard, row_start in enumerate(range(0, n_full, SHARD_SIZE)):
                     shard = self._dataset.select(  # yields another Datset not rows
                         range(row_start, min(row_start + SHARD_SIZE, n_full))
@@ -74,8 +78,7 @@ class MakeIndexBuilder:
                         c.update(count)
 
                     # transfer takes time, so do this across all GPUs in parallel
-                    on_gpus = iunsqueeze(self._on_gpus)
-                    for on_cpu in imap(on_gpus, self._transfer_and_reset, -1):
+                    for on_cpu in executor.map(self._transfer_and_reset, self._on_gpus):
                         self._index.merge_from(on_cpu)
 
                     shard_path = dir / f"shard_{i_shard:03d}.faiss"

@@ -23,7 +23,7 @@ def dump_dataset(
     if not (source.suffix == "" and dest.suffix == ".sqlite"):
         raise ValueError("invalid source and dest types")
 
-    paths = [str(path) for path in source.glob("*.parquet")]
+    paths = [str(path) for path in sorted(source.glob("*.parquet"))]
     dataset: ds.Dataset = ds.dataset(paths)
 
     # extract the vector dtype and length from the schema
@@ -62,4 +62,4 @@ def dump_dataset(
             if bf16:
                 embeddings = embeddings.bfloat16()
 
-            insert_embeddings(ids_list, embeddings, conn)
+            insert_embeddings(zip(ids_list, embeddings), conn)
