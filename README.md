@@ -9,5 +9,4 @@ A `conda` environment YAML, containing module dependencies and developer utiliti
 ```bash
 conda env create -f environment.yml
 conda activate sidecar-search-dev
-pip install --no-build-isolation -e .
 ```

@@ -5,6 +5,7 @@ channels:
   - conda-forge
 dependencies:
   - python
+  - pip
   - pytorch-gpu~=2.6
   - sentence-transformers~=3.4
   - tqdm
@@ -17,3 +18,5 @@ dependencies:
   - pyright
   - pytest>=9.0
   - coverage[toml]
+  - pip:
+      - -e .
