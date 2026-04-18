@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools >= 77.0.3"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "sidecar-search"
@@ -45,11 +45,9 @@ Issues = "https://github.com/colonelwatch/sidecar-search/issues"
 [project.scripts]
 sidecar-search = "sidecar_search.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["sidecar_search", "sidecar_search.*"]
-exclude = ["*.tests", "*.conftest"]
-namespaces = false
+[tool.hatch.build.targets.wheel]
+packages = ["sidecar_search"]
+exclude = ["**/tests", "**/conftest.py"]
 
 [tool.pytest]
 minversion = "9.0"  # pytest <9.0 _will not_ parse tool.pytest!
