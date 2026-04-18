@@ -8,6 +8,7 @@ import pyarrow.dataset as ds
 import torch
 
 from sidecar_search.utils.table_utils import (
+    DTypeCode,
     create_embeddings_table,
     insert_embeddings,
 )
@@ -42,7 +43,7 @@ def dump_dataset(
 
     with sqlite3.connect(dest) as conn:
         conn.execute("PRAGMA page_size = 32768")
-        create_embeddings_table(conn, torch.bfloat16 if bf16 else torch.float16)
+        create_embeddings_table(conn, DTypeCode.BFLOAT16 if bf16 else DTypeCode.HALF)
         for batch in dataset.to_batches(batch_size=batch_size):
             ids_arr = batch["id"]
             if ids_arr.type != pa.string():

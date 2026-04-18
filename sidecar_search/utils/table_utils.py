@@ -61,14 +61,14 @@ class DTypeCode(StrEnum):
         return inverse_mapping
 
 
-def create_embeddings_table(conn: sqlite3.Connection, dtype: "torch.dtype") -> None:
+def create_embeddings_table(conn: sqlite3.Connection, dtype_code: DTypeCode) -> None:
     (page_size,) = conn.execute("PRAGMA page_size").fetchone()
     if page_size < 16384:
         warnings.warn(
             "Current page size is small, and disk usage may be inflated. Use "
             "16384, 32768, or 65536 (if supported) and VACUUM if needed."
         )
-    decltype = DTypeCode.from_torch(dtype).to_sqlite3_decltype()
+    decltype = dtype_code.to_sqlite3_decltype()
     conn.execute(f"CREATE TABLE embeddings(id TEXT PRIMARY KEY, embedding {decltype})")
 
 
