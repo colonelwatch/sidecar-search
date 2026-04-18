@@ -3,16 +3,12 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Generator, Iterator, Self
 
-import torch
 from tqdm import tqdm
 
 from sidecar_search.utils.gpu_utils import consume_futures, imap
-from sidecar_search.utils.table_utils import insert_embeddings, to_sql_binary
+from sidecar_search.utils.table_utils import insert_embeddings
 
 from .encode import DocumentEmbeddingBatch, DocumentIdBatch
-
-# TODO: if we're gonna do global registration, shore up to_sql_binary
-sqlite3.register_adapter(torch.Tensor, to_sql_binary)
 
 
 class SharedConnection:

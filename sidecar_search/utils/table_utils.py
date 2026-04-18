@@ -1,71 +1,101 @@
 import sqlite3
-from typing import Iterable, Literal
-
-import numpy as np
-import numpy.typing as npt
-import torch
+from dataclasses import dataclass
+from enum import StrEnum
+from functools import partial
+from typing import TYPE_CHECKING, Iterable, LiteralString, Mapping, assert_never
 
 from .env_utils import BF16
 
+# this module is auto-imported by __init__ to ensure the adapters and converters
+# are registered, and a lazy PyTorch import preserves the import time floor
+if TYPE_CHECKING:
+    import torch
 
-class VectorConverter:
-    def __init__(self, bf16: bool, to_dtype: Literal["fp32", "fp16"] | None):
-        self.bf16 = bf16  # else fp16
-        self.to_dtype = to_dtype
+SQLITE3_VECTOR_PREFIX = "sidecarsearch_vector_"
 
-    def from_sql_binary(self, val: bytes) -> npt.NDArray:
-        if self.bf16:
-            arr = np.frombuffer(val, dtype=np.uint16).copy()
-            t = torch.tensor(arr).view(torch.bfloat16)
-            arr = t.to(torch.float32).numpy()
-        else:
-            arr = np.frombuffer(val, dtype=np.float16)
-
-        if self.to_dtype == "fp32":
-            arr = arr.astype(np.float32)
-        elif self.to_dtype == "fp16":
-            arr = arr.astype(np.float16)
-        # else don't coerce from the original dtype
-
-        return arr
+_dtype_code_inverse_mapping: Mapping["torch.dtype", "DTypeCode"] | None = None
 
 
-def to_sql_binary(vect: torch.Tensor) -> sqlite3.Binary:
-    if vect.dtype == torch.bfloat16:
-        vect = vect.view(torch.uint16)
-    return vect.numpy().data
+class DTypeCode(StrEnum):
+    FLOAT = "fp32"
+    DOUBLE = "fp64"
+    HALF = "fp16"
+    BFLOAT16 = "bf16"
+
+    def to_torch(self) -> "torch.dtype":
+        import torch
+
+        match self:
+            case DTypeCode.FLOAT:
+                return torch.float32
+            case DTypeCode.DOUBLE:
+                return torch.float64
+            case DTypeCode.HALF:
+                return torch.float16
+            case DTypeCode.BFLOAT16:
+                return torch.bfloat16
+            case _ as unrecognized:
+                assert_never(unrecognized)
+                raise ValueError(f"unrecognized dtype {unrecognized}")
+
+    @classmethod
+    def from_torch(cls, dtype: "torch.dtype") -> "DTypeCode":
+        inverse_map = cls._get_inverse_mapping()
+        try:
+            return inverse_map[dtype]
+        except KeyError as e:
+            raise ValueError("unrecognized dtype") from e
+
+    def to_sqlite3_decltype(self) -> LiteralString:
+        return SQLITE3_VECTOR_PREFIX + self.value
+
+    @classmethod
+    def _get_inverse_mapping(cls) -> Mapping["torch.dtype", "DTypeCode"]:
+        global _dtype_code_inverse_mapping
+
+        if _dtype_code_inverse_mapping is not None:
+            return _dtype_code_inverse_mapping
+
+        inverse_mapping = {value.to_torch(): value for value in cls}
+
+        _dtype_code_inverse_mapping = inverse_mapping
+        return inverse_mapping
 
 
-def create_embeddings_table(conn: sqlite3.Connection, bf16: bool):
-    conn.execute("CREATE TABLE embeddings(id TEXT PRIMARY KEY, embedding vector)")
-    conn.execute("CREATE TABLE properties(key TEXT, value TEXT)")
-    conn.execute(
-        "INSERT INTO properties VALUES(?, ?)", ("dtype", "bf16" if bf16 else "fp16")
-    )
+def create_embeddings_table(conn: sqlite3.Connection, dtype: "torch.dtype"):
+    decltype = DTypeCode.from_torch(dtype).to_sqlite3_decltype()
+    conn.execute(f"CREATE TABLE embeddings(id TEXT PRIMARY KEY, embedding {decltype})")
 
 
-def query_bf16(conn: sqlite3.Connection) -> bool:
-    (dtype,) = conn.execute(
-        "SELECT value FROM properties where key = 'dtype'"
-    ).fetchone()
+@dataclass
+class _Vector:
+    vector: "torch.Tensor"
 
-    if dtype == "bf16":
-        bf16 = True
-    elif dtype == "fp16":
-        bf16 = False
-    else:
-        raise ValueError("database contains an invalid dtype value")
+    def __post_init__(self) -> None:
+        if self.vector.ndim != 1:
+            raise ValueError(f"expected 1D Tensor, got {self.vector.ndim}D Tensor")
 
-    return bf16
+    def to_sqlite3(self) -> memoryview:
+        import torch
+
+        return self.vector.view(torch.uint8).numpy().data
+
+    @staticmethod
+    def to_torch(blob: bytes, dtype_code: DTypeCode | None = None) -> "torch.Tensor":
+        import torch
+
+        # PyTorch does not support read-only buffers, so copy to a bytearray
+        dtype = dtype_code.to_torch() if dtype_code else None
+        return torch.asarray(bytearray(blob), dtype=dtype)
 
 
 def insert_embeddings(
-    pairs: Iterable[tuple[str, torch.Tensor]], conn: sqlite3.Connection
+    pairs: Iterable[tuple[str, "torch.Tensor"]], conn: sqlite3.Connection
 ):
     conn.executemany(
         "INSERT INTO embeddings VALUES(?, ?) "
         "ON CONFLICT(id) DO UPDATE SET embedding=excluded.embedding",
-        pairs,
+        ((id_, _Vector(embedding)) for id_, embedding in pairs),
     )
 
 
@@ -73,6 +103,8 @@ def main() -> int:
     import argparse
     from pathlib import Path
     from sys import stderr
+
+    import torch
 
     parser = argparse.ArgumentParser("table_utils.py", "Init the embeddings table.")
     parser.add_argument("target", type=Path)
@@ -83,10 +115,20 @@ def main() -> int:
         print("error: target already exists", file=stderr)
 
     with sqlite3.connect(target) as conn:
-        create_embeddings_table(conn, BF16)
+        create_embeddings_table(conn, torch.bfloat16 if BF16 else torch.float16)
 
     return 0
 
+
+# register converters
+for dtype_code in DTypeCode:
+    sqlite3.register_converter(
+        dtype_code.to_sqlite3_decltype(),
+        partial(_Vector.to_torch, dtype_code=dtype_code),
+    )
+
+# register adapter
+sqlite3.register_adapter(_Vector, _Vector.to_sqlite3)
 
 if __name__ == "__main__":
     main()

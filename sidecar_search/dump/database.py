@@ -1,29 +1,35 @@
 import sqlite3
 from itertools import batched
 from pathlib import Path
-from typing import Generator, Iterable, Literal
+from typing import Generator, Literal, Sequence
 
-import numpy as np
-import numpy.typing as npt
 import pyarrow as pa
-
-from sidecar_search.utils.table_utils import VectorConverter, query_bf16
+import torch
 
 from .parquet_utils import open_parquet, write_to_parquet
 
 
 def _to_arrays(
-    tups: Iterable[tuple[str, npt.NDArray]],
+    tups: Sequence[tuple[str, torch.Tensor]],
 ) -> tuple[pa.Array, pa.Array]:
-    ids: list[str] = []
-    embeddings: list[npt.NDArray] = []
-    for id_, embedding in tups:
-        ids.append(id_)
-        embeddings.append(embedding)
+    if not tups:
+        raise ValueError("cannot convert empty batch")
 
-    dim = embeddings[0].shape[0]
-    embeddings_arr = np.hstack(embeddings)
-    embeddings_arr = pa.array(embeddings_arr)
+    _, embedding_0 = tups[0]
+    (dim,) = embedding_0.shape
+    dtype = embedding_0.dtype
+    if dtype == torch.bfloat16:
+        dtype = torch.float32  # bfloat16 does not have a Arrow equivalent
+
+    embeddings_arr = torch.empty((len(tups), dim), dtype=dtype)
+
+    ids: list[str] = []
+    for i, (id_, embedding) in enumerate(tups):
+        ids.append(id_)
+        embeddings_arr[i, :] = embedding
+
+    embeddings_arr = torch.ravel(embeddings_arr)
+    embeddings_arr = pa.array(embeddings_arr.numpy())
     embeddings_arr = pa.FixedSizeListArray.from_arrays(embeddings_arr, dim)
     ids_arr = pa.array(ids, pa.string())
 
@@ -49,21 +55,25 @@ def dump_database(
     if not (source.suffix == ".sqlite" and dest.suffix == ""):
         raise ValueError("invalid source and dest types")
 
-    # detect the type used in the database
     with sqlite3.connect(source, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
-        bf16 = query_bf16(conn)
+        cursor = conn.execute("SELECT embedding FROM embeddings LIMIT 1")
+        (embedding,) = cursor.fetchone()
 
-    # VectorConverter does torch.bfloat16 to np.float32
-    to_dtype = "fp32" if enforce == "bf16" else enforce
-    converter = VectorConverter(bf16, to_dtype)
-    sqlite3.register_converter("vector", converter.from_sql_binary)
+        (dim,) = embedding.shape
+        dtype = embedding.dtype
+
+    if not enforce:
+        if dtype == torch.bfloat16:
+            bf16 = True
+        elif dtype == torch.float16:
+            bf16 = False
+        else:
+            raise ValueError(f"unrecognized embedding dtype {dtype}")
+    else:
+        bf16 = enforce == "bf16"
 
     # To save RAM, push chunks of row_group_size into shards of shard_size one-by-one
     with sqlite3.connect(source, detect_types=sqlite3.PARSE_DECLTYPES) as conn:
-        # get the dimension by querying the first row and checking its length
-        embedding = conn.execute("SELECT embedding FROM embeddings LIMIT 1")
-        dim = embedding.fetchone()[0].shape[0]
-
         id_ = 0  # shard id
         counter = 0  # the number of rows the current shard will have
         shard = open_parquet(dest / f"data_{id_:03}.parquet", dim, bf16)

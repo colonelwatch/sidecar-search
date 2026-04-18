@@ -10,7 +10,6 @@ import torch
 from sidecar_search.utils.table_utils import (
     create_embeddings_table,
     insert_embeddings,
-    to_sql_binary,
 )
 
 
@@ -41,9 +40,8 @@ def dump_dataset(
     else:
         bf16 = True if enforce == "bf16" else False
 
-    sqlite3.register_adapter(torch.Tensor, to_sql_binary)
     with sqlite3.connect(dest) as conn:
-        create_embeddings_table(conn, bf16)
+        create_embeddings_table(conn, torch.bfloat16 if bf16 else torch.float16)
         for batch in dataset.to_batches(batch_size=batch_size):
             ids_arr = batch["id"]
             if ids_arr.type != pa.string():
