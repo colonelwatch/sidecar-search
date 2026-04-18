@@ -41,6 +41,7 @@ def dump_dataset(
         bf16 = True if enforce == "bf16" else False
 
     with sqlite3.connect(dest) as conn:
+        conn.execute("PRAGMA page_size = 32768")
         create_embeddings_table(conn, torch.bfloat16 if bf16 else torch.float16)
         for batch in dataset.to_batches(batch_size=batch_size):
             ids_arr = batch["id"]

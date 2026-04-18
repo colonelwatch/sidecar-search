@@ -1,4 +1,5 @@
 import sqlite3
+import warnings
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
@@ -62,7 +63,13 @@ class DTypeCode(StrEnum):
         return inverse_mapping
 
 
-def create_embeddings_table(conn: sqlite3.Connection, dtype: "torch.dtype"):
+def create_embeddings_table(conn: sqlite3.Connection, dtype: "torch.dtype") -> None:
+    (page_size,) = conn.execute("PRAGMA page_size").fetchone()
+    if page_size < 16384:
+        warnings.warn(
+            "Current page size is small, and disk usage may be inflated. Use "
+            "16384, 32768, or 65536 (if supported) and VACUUM if needed."
+        )
     decltype = DTypeCode.from_torch(dtype).to_sqlite3_decltype()
     conn.execute(f"CREATE TABLE embeddings(id TEXT PRIMARY KEY, embedding {decltype})")
 
@@ -91,7 +98,7 @@ class _Vector:
 
 def insert_embeddings(
     pairs: Iterable[tuple[str, "torch.Tensor"]], conn: sqlite3.Connection
-):
+) -> None:
     conn.executemany(
         "INSERT INTO embeddings VALUES(?, ?) "
         "ON CONFLICT(id) DO UPDATE SET embedding=excluded.embedding",
@@ -115,6 +122,7 @@ def main() -> int:
         print("error: target already exists", file=stderr)
 
     with sqlite3.connect(target) as conn:
+        conn.execute("PRAGMA page_size = 32768")
         create_embeddings_table(conn, torch.bfloat16 if BF16 else torch.float16)
 
     return 0
