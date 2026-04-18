@@ -43,7 +43,6 @@ Repository = "https://github.com/colonelwatch/sidecar-search.git"
 Issues = "https://github.com/colonelwatch/sidecar-search/issues"
 
 [project.scripts]
-sidecar-search-table = "sidecar_search.utils.table_utils:main"
 sidecar-search = "sidecar_search.cli:main"
 
 [tool.setuptools.packages.find]

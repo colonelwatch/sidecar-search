@@ -5,8 +5,6 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Iterable, LiteralString, Mapping, assert_never
 
-from .env_utils import BF16
-
 # this module is auto-imported by __init__ to ensure the adapters and converters
 # are registered, and a lazy PyTorch import preserves the import time floor
 if TYPE_CHECKING:
@@ -106,28 +104,6 @@ def insert_embeddings(
     )
 
 
-def main() -> int:
-    import argparse
-    from pathlib import Path
-    from sys import stderr
-
-    import torch
-
-    parser = argparse.ArgumentParser("table_utils.py", "Init the embeddings table.")
-    parser.add_argument("target", type=Path)
-    args = parser.parse_args()
-
-    target: Path = args.target
-    if target.exists():
-        print("error: target already exists", file=stderr)
-
-    with sqlite3.connect(target) as conn:
-        conn.execute("PRAGMA page_size = 32768")
-        create_embeddings_table(conn, torch.bfloat16 if BF16 else torch.float16)
-
-    return 0
-
-
 # register converters
 for dtype_code in DTypeCode:
     sqlite3.register_converter(
@@ -137,6 +113,3 @@ for dtype_code in DTypeCode:
 
 # register adapter
 sqlite3.register_adapter(_Vector, _Vector.to_sqlite3)
-
-if __name__ == "__main__":
-    main()

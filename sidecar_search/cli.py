@@ -8,9 +8,10 @@ from .args_base import ArgsBase
 from .build.cli import BuildArgs, build_main
 from .dump.cli import DumpArgs, dump_main
 from .index.cli import AllIndexSubcommandArgs, IndexGroupArgs, index_main
+from .init.cli import InitArgs, init_main
 
-AllCommandArgs = BuildArgs | IndexGroupArgs | DumpArgs
-AllArgs = BuildArgs | AllIndexSubcommandArgs | DumpArgs
+AllCommandArgs = InitArgs | BuildArgs | IndexGroupArgs | DumpArgs
+AllArgs = InitArgs | BuildArgs | AllIndexSubcommandArgs | DumpArgs
 
 ALL_COMMAND_ARGS = cast(tuple[type[AllCommandArgs], ...], get_args(AllCommandArgs))
 
@@ -40,6 +41,8 @@ def main() -> int:
         return 2
 
     match args.command:
+        case "init":
+            ret = init_main(args)
         case "build":
             ret = build_main(args)
         case "dump":
