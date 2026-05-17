@@ -17,6 +17,7 @@ dependencies:
   - pyarrow-stubs
   - pyright
   - pytest>=9.0
+  - pytest-benchmark~=5.0
   - coverage[toml]
   - pip:
       - -e .

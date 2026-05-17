@@ -54,6 +54,8 @@ minversion = "9.0"  # pytest <9.0 _will not_ parse tool.pytest!
 norecursedirs = [  # removes "build" from norecursedirs defaults
 	"*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"
 ]
+markers = ["integration"]
+addopts = ["-m", "not integration", "--benchmark-disable"]
 
 [tool.coverage.run]
 source = ["sidecar_search"]
