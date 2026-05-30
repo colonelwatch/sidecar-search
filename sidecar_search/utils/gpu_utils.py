@@ -1,8 +1,14 @@
 import os
+import weakref
 from collections import deque
+from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+from enum import Enum, auto
 from itertools import cycle
-from typing import Any, Callable, Concatenate, Generator, Iterator, overload
+from threading import Condition, Thread
+from types import TracebackType
+from typing import Any, Concatenate, Self, overload
 
 import torch
 
@@ -64,6 +70,7 @@ def imap[T, U_contra, V_contra, W_contra](
 ) -> Generator[T, None, None]: ...
 
 
+# TODO: refactor to a class?
 def imap[T](
     inputs: Iterator[tuple],
     func: Callable[..., T],
@@ -171,3 +178,167 @@ def imap_multi_gpu[T](
         on_done=on_done,
         on_break=on_break,
     )
+
+
+class _StreamState(Enum):
+    RUNNING = auto()
+    CANCELLING = auto()
+    FINISHED = auto()
+
+
+# TODO: use typing_extensions.Sentinel?
+class StreamSentinel(Enum):
+    token = auto()
+
+
+class StreamSlot[T]:
+    def __init__(self, q: deque[T], cv: Condition) -> None:
+        self._q = q
+        self._cv = cv
+        self._closed = False
+
+    def put_result(self, result: T) -> None:
+        if self._closed:
+            raise RuntimeError("accessed slot after it was closed")
+        with self._cv:
+            self._q.append(result)
+            self._cv.notify_all()
+        self.close()
+
+    def close(self) -> None:
+        self._closed = True
+
+
+class Stream[T]:
+    @classmethod
+    def new(cls, maxsize: int = 0) -> Self:
+        q: deque[T] = deque()
+        cv: Condition = Condition()
+        return cls(maxsize, q, cv)
+
+    def __init__(self, maxsize: int, q: deque[T], cv: Condition) -> None:
+        self._maxsize = maxsize
+        self._q = q
+        self._state = _StreamState.RUNNING
+        self._exc: BaseException | None = None
+        self._cv = cv
+
+    @contextmanager
+    def wait_for_slot_or_cancelling(
+        self,
+    ) -> Generator[StreamSlot[T] | None, None, None]:
+        with self._cv:
+            if self._state is _StreamState.FINISHED:
+                raise RuntimeError("waited for slot in a finished stream")
+            if self._maxsize > 0:
+                self._cv.wait_for(
+                    lambda: (
+                        len(self._q) < self._maxsize
+                        or self._state is _StreamState.CANCELLING
+                    )
+                )
+            cancelling = self._state is _StreamState.CANCELLING
+
+        if cancelling:
+            yield None
+            return
+
+        slot = StreamSlot(self._q, self._cv)
+        try:
+            yield slot
+        finally:
+            slot.close()
+
+    def finish(self, exc: BaseException | None) -> None:
+        with self._cv:
+            if self._state is _StreamState.FINISHED:
+                raise RuntimeError("finished a stream twice")
+            self._exc = exc
+            self._state = _StreamState.FINISHED
+            self._cv.notify_all()
+
+    def get_result(self) -> T | StreamSentinel:
+        with self._cv:
+            self._cv.wait_for(
+                lambda: (len(self._q) > 0 or self._state is _StreamState.FINISHED)
+            )
+            if len(self._q) > 0:
+                result = self._q.popleft()
+                self._cv.notify_all()
+            elif self._exc is None:
+                result = StreamSentinel.token
+            else:
+                raise self._exc
+        return result
+
+    def cancel(self, block: bool = False) -> None:
+        with self._cv:
+            if self._state is _StreamState.FINISHED:
+                return
+            self._state = _StreamState.CANCELLING
+            self._cv.notify_all()
+            if block:
+                self._cv.wait_for(lambda: self._state is _StreamState.FINISHED)
+
+
+class iqueue[T](Iterator[T]):
+    def __init__(self, items: Iterator[T], maxsize: int = 0) -> None:
+        stream: Stream[T] = Stream.new(maxsize)
+        self._stream = stream
+        self._started = False
+        self._finalized = False
+        self._thread = Thread(target=self._routine, args=(stream, items))
+        weakref.finalize(self, stream.cancel)
+
+    def __enter__(self) -> Self:
+        self._start_thread_if_not_started()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        exc_tb: TracebackType,
+    ) -> None:
+        # cancel stream manually, and to have a gc-like lifetime, bar future use
+        # of this object by setting (and checking) self._finalized
+        assert self._started, "__enter__ did not start thread"
+        self._stream.cancel(block=True)
+        self._thread.join()
+        self._finalized = True
+
+    def __iter__(self) -> Self:
+        self._start_thread_if_not_started()
+        return self
+
+    def __next__(self) -> T:
+        self._start_thread_if_not_started()
+        item = self._stream.get_result()
+        if item is StreamSentinel.token:
+            raise StopIteration
+        return item
+
+    def _start_thread_if_not_started(self) -> None:
+        if self._finalized:
+            raise RuntimeError("used an iqueue that was shut down")
+        if not self._started:
+            self._thread.start()
+            self._started = True
+
+    @staticmethod
+    def _routine(stream: Stream[T], items: Iterator[T]) -> None:
+        try:
+            while True:
+                with stream.wait_for_slot_or_cancelling() as slot:
+                    if not slot:
+                        break  # we are cancelling
+                    try:
+                        item = next(items)
+                    except StopIteration:
+                        break
+                    else:
+                        slot.put_result(item)
+        except BaseException as e:
+            stream.finish(e)
+        else:
+            stream.finish(None)
