@@ -6,7 +6,11 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from enum import Enum, auto
 from itertools import cycle
-from threading import Condition, Thread
+from threading import (
+    Condition,
+    Thread,
+    _register_atexit,  # pyright: ignore[reportAttributeAccessIssue]
+)
 from types import TracebackType
 from typing import Any, Concatenate, Self, overload
 
@@ -281,6 +285,17 @@ class Stream[T]:
                 self._cv.wait_for(lambda: self._state is _StreamState.FINISHED)
 
 
+_iqueue_finalizers: set[Callable[[], Any]] = set()
+
+
+def _cancel_open_iqueues() -> None:
+    for finalizer in _iqueue_finalizers:
+        finalizer()
+
+
+_register_atexit(_cancel_open_iqueues)
+
+
 class iqueue[T](Iterator[T]):
     def __init__(self, items: Iterator[T], maxsize: int = 4) -> None:
         stream: Stream[T] = Stream.new(maxsize)
@@ -288,7 +303,13 @@ class iqueue[T](Iterator[T]):
         self._started = False
         self._finalized = False
         self._thread = Thread(target=self._routine, args=(stream, items))
-        weakref.finalize(self, stream.cancel)
+
+        # to support cancellation when used not as a context manager, register
+        # a finalizer, but shift up on-exit call to _before_ non-daemonic
+        # threads are joined (like is done in ThreadPoolExecutor)
+        finalizer = weakref.finalize(self, stream.cancel)
+        finalizer.atexit = False
+        _iqueue_finalizers.add(finalizer)
 
     def __enter__(self) -> Self:
         self._start_thread_if_not_started()
