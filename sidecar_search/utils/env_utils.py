@@ -1,11 +1,33 @@
 import os
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, overload
 
 
-def get_env_var[T, U](
-    key: str, type_: Callable[[str], T] = str, default: U = None
-) -> T | U:
+@overload
+def get_env_var(
+    key: str, type_: Callable[[str], str] = ..., default: None = ...
+) -> str | None: ...
+
+
+@overload
+def get_env_var[U](
+    key: str, type_: Callable[[str], str] = ..., default: U = ...
+) -> str | U: ...
+
+
+@overload
+def get_env_var[T](
+    key: str, type_: Callable[[str], T], default: None = ...
+) -> T | None: ...
+
+
+@overload
+def get_env_var[T, U](key: str, type_: Callable[[str], T], default: U) -> T | U: ...
+
+
+def get_env_var(
+    key: str, type_: Callable[[str], Any] = str, default: Any = None
+) -> Any:
     var = os.getenv(key)
     if var is not None:
         var = type_(var)
