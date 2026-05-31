@@ -47,7 +47,7 @@ def _process_lines_batch(lines: Sequence[bytes]) -> DocumentIdBatch:
 def iter_documents(batch_size: int) -> Iterator[DocumentIdBatch]:
     stdin_cast = cast(BinaryIO, sys.stdin.buffer)
     batches = zip(batched(stdin_cast, batch_size))
-    return imap(batches, _process_lines_batch, 1, prefetch_factor=3)
+    return imap(batches, _process_lines_batch, 1)
 
 
 def build_main(args: BuildArgs) -> int:

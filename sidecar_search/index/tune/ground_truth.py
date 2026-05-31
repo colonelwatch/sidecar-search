@@ -1,11 +1,12 @@
-from itertools import accumulate, tee
+from collections.abc import Generator, Iterator
+from functools import reduce
 from typing import TypedDict, Unpack, cast
 
 import torch
 from datasets import Dataset
 from tqdm import tqdm
 
-from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu
+from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu, iqueue
 
 from ..provisioner import Provisioner
 from ..utils.datasets_utils import iter_tensors
@@ -63,16 +64,19 @@ class GroundTruthBuilder:
             total=len(self._dataset),
             disable=(not progress),
         ) as counter:
+            # define a closure with the created counter
+            def update_counter(
+                batches: Iterator[tuple[torch.Tensor, torch.Tensor]],
+            ) -> Generator[tuple[torch.Tensor, torch.Tensor], None, None]:
+                for ids, embeddings in batches:
+                    counter.update(len(ids))
+                    yield ids, embeddings
+
             batches = iter_tensors(self._dataset)
-            batches, batches_copy = tee(batches, 2)
-            lengths = imap(batches_copy, self._get_length, 0)
+            batches = update_counter(batches)  # w/o CUDA sync, is always approximate
             batches = imap_multi_gpu(batches, self._local_topk)
-            batches = accumulate(
-                batches, self._reduce_topk, initial=(gt_ids, gt_scores)
-            )
-            batches = zip(lengths, batches)
-            for length, (gt_ids, _) in batches:
-                counter.update(length)
+            batches = iqueue(batches)
+            gt_ids, _ = reduce(self._reduce_topk, batches, (gt_ids, gt_scores))
 
         gt_ids = gt_ids.cpu()
 
@@ -83,9 +87,6 @@ class GroundTruthBuilder:
             }
         )
         return ground_truth
-
-    def _get_length(self, ids: torch.Tensor, _: torch.Tensor) -> int:
-        return len(ids)
 
     # NOTE: ground truth is computed with the full embedding length
     def _local_topk(

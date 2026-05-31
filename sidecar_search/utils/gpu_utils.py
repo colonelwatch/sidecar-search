@@ -58,7 +58,6 @@ def imap[T, U_contra](
     n_tasks: int,
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
@@ -71,7 +70,6 @@ def imap[T, U_contra, V_contra](
     n_tasks: int,
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
@@ -84,7 +82,6 @@ def imap[T, U_contra, V_contra, W_contra](
     n_tasks: int,
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
@@ -97,13 +94,9 @@ def imap[T](
     n_tasks: int,  # TODO: rename to n_workers
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]:
-    if prefetch_factor <= 0:
-        raise ValueError("invalid prefetch_factor")
-
     if n_tasks < 0:
         n_tasks = os.cpu_count() or 1
 
@@ -119,9 +112,7 @@ def imap[T](
 
         try:
             futs = (submit(func, *data_in) for data_in in inputs)
-            yield from consume_futures(
-                futs, n_tasks * prefetch_factor, yield_timeout=yield_timeout
-            )
+            yield from consume_futures(futs, n_tasks, yield_timeout=yield_timeout)
         except (Exception, BaseException) as e:
             if on_break:
                 on_break(e)
@@ -136,7 +127,6 @@ def imap_multi_gpu[T, U_contra](
     tasks_per_gpu: int = 1,
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
@@ -149,7 +139,6 @@ def imap_multi_gpu[T, U_contra, V_contra](
     tasks_per_gpu: int = 1,
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
@@ -162,7 +151,6 @@ def imap_multi_gpu[T, U_contra, V_contra, W_contra](
     tasks_per_gpu: int = 1,
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]: ...
@@ -174,7 +162,6 @@ def imap_multi_gpu[T](
     tasks_per_gpu: int = 1,
     *,
     yield_timeout: float | None = None,
-    prefetch_factor: int = 2,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[T, None, None]:
@@ -194,7 +181,6 @@ def imap_multi_gpu[T](
         func_with_gpu,
         n_tasks,
         yield_timeout=yield_timeout,
-        prefetch_factor=prefetch_factor,
         on_done=on_done,
         on_break=on_break,
     )

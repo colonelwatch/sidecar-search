@@ -7,7 +7,7 @@ from datasets import Dataset
 from tqdm import tqdm
 
 from sidecar_search.utils.contextmanager_utils import del_on_exc
-from sidecar_search.utils.gpu_utils import imap
+from sidecar_search.utils.gpu_utils import imap, iqueue
 
 from ..provisioner import Provisioner
 from ..utils.datasets_utils import iter_tensors
@@ -38,6 +38,7 @@ class MemmapBuilder:
             # save batches to disk by assigning to memmap slices
             batches = iter_tensors(self._dataset)
             batches = imap(batches, self._preproc, -1)
+            batches = iqueue(batches)
             for embeddings_batch in batches:
                 n_batch = len(embeddings_batch)
 

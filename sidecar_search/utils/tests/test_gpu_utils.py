@@ -130,8 +130,7 @@ class TestImapConcurrent:
             )
             _ = list(results_iter)
 
-    @pytest.mark.parametrize("prefetch_factor", [1, 2])
-    def test_backpressure(self, n_tasks: int, prefetch_factor: int) -> None:
+    def test_backpressure(self, n_tasks: int) -> None:
         evt = Event()
 
         vals_iter = count()
@@ -141,14 +140,13 @@ class TestImapConcurrent:
                 lambda _: evt.wait(),
                 n_tasks,
                 yield_timeout=0,
-                prefetch_factor=prefetch_factor,
                 on_break=(lambda _: evt.set()),
             )
             _ = list(results_iter)
         except TimeoutError:
             pass
 
-        assert next(vals_iter) == n_tasks * prefetch_factor + 1
+        assert next(vals_iter) == n_tasks + 1
 
     def test_on_break(self, n_tasks: int) -> None:
         exc = Exception()
@@ -170,11 +168,6 @@ class TestImapConcurrent:
 
         assert exc is passed and exc is raised
 
-    def test_raise_on_nonpositive_prefetch_factor(self, n_tasks: int) -> None:
-        with pytest.raises(ValueError):
-            vals = range(10)
-            _ = list(imap(zip(vals), lambda x: x, n_tasks, prefetch_factor=-1))
-
     def test_empty_iterator(self, n_tasks: int) -> None:
         vals = iter(tuple())
         assert list(imap(zip(vals), lambda x: x, n_tasks)) == []
@@ -191,7 +184,6 @@ def mock_imap(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 # NOTE: these are kw-only arguments, which don't require manual resolution
 class ExpectedImapKwargs(TypedDict):
     yield_timeout: float | None
-    prefetch_factor: int
     on_done: Callable[[Future], Any] | None
     on_break: Callable[[Exception | BaseException], Any] | None
 
@@ -227,7 +219,6 @@ class TestImapMultiGpu:
         vals = range(10)
         my_kwargs = ExpectedImapKwargs(
             yield_timeout=10,
-            prefetch_factor=3,
             on_done=(lambda _: None),
             on_break=(lambda _: None),
         )

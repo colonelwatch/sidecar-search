@@ -10,7 +10,7 @@ from faiss.contrib.ondisk import merge_ondisk
 from tqdm import tqdm
 
 from sidecar_search.utils.contextmanager_utils import del_on_exc
-from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu
+from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu, iqueue
 
 from .provisioner import Provisioner
 from .utils.datasets_utils import iter_tensors
@@ -73,6 +73,7 @@ class MakeIndexBuilder:
 
                     batches = iter_tensors(shard)
                     batches = imap(batches, self._preproc, -1)
+                    batches = iqueue(batches)
                     counts = imap_multi_gpu(batches, self._add_with_gpu)
                     for count in counts:
                         c.update(count)
