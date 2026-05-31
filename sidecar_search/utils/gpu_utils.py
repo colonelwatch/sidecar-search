@@ -311,7 +311,7 @@ class iqueue[T](Iterator[T]):
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        exc_tb: TracebackType,
+        exc_tb: TracebackType | None,
     ) -> None:
         # cancel stream manually, and to have a gc-like lifetime, bar future use
         # of this object by setting (and checking) self._finalized
