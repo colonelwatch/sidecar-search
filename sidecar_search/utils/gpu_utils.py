@@ -282,7 +282,7 @@ class Stream[T]:
 
 
 class iqueue[T](Iterator[T]):
-    def __init__(self, items: Iterator[T], maxsize: int = 0) -> None:
+    def __init__(self, items: Iterator[T], maxsize: int = 4) -> None:
         stream: Stream[T] = Stream.new(maxsize)
         self._stream = stream
         self._started = False
