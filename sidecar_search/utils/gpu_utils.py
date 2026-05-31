@@ -8,6 +8,7 @@ from enum import Enum, auto
 from itertools import cycle
 from threading import (
     Condition,
+    Lock,
     Thread,
     _register_atexit,  # pyright: ignore[reportAttributeAccessIssue]
 )
@@ -15,6 +16,21 @@ from types import TracebackType
 from typing import Any, Concatenate, Self, overload
 
 import torch
+
+_finalizers: weakref.WeakKeyDictionary[Any, Callable[[], Any]] = (
+    weakref.WeakKeyDictionary()
+)
+_finalizers_lock = Lock()
+
+
+def _run_finalizers() -> None:
+    with _finalizers_lock:
+        finalizers = list(_finalizers.values())
+    for finalizer in finalizers:
+        finalizer()
+
+
+_register_atexit(_run_finalizers)
 
 
 def consume_futures[T](
@@ -285,17 +301,6 @@ class Stream[T]:
                 self._cv.wait_for(lambda: self._state is _StreamState.FINISHED)
 
 
-_iqueue_finalizers: set[Callable[[], Any]] = set()
-
-
-def _cancel_open_iqueues() -> None:
-    for finalizer in _iqueue_finalizers:
-        finalizer()
-
-
-_register_atexit(_cancel_open_iqueues)
-
-
 class iqueue[T](Iterator[T]):
     def __init__(self, items: Iterator[T], maxsize: int = 4) -> None:
         stream: Stream[T] = Stream.new(maxsize)
@@ -309,7 +314,8 @@ class iqueue[T](Iterator[T]):
         # threads are joined (like is done in ThreadPoolExecutor)
         finalizer = weakref.finalize(self, stream.cancel)
         finalizer.atexit = False
-        _iqueue_finalizers.add(finalizer)
+        with _finalizers_lock:
+            _finalizers[self] = finalizer
 
     def __enter__(self) -> Self:
         self._start_thread_if_not_started()
