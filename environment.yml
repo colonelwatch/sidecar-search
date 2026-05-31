@@ -15,7 +15,7 @@ dependencies:
   - datasets>=3.3.2
   # development only
   - pyarrow-stubs
-  - pyright
+  - pyrefly>=1.0
   - pytest>=9.0
   - pytest-benchmark~=5.0
   - coverage[toml]

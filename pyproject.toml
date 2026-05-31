@@ -60,3 +60,6 @@ addopts = ["-m", "not integration", "--benchmark-disable"]
 [tool.coverage.run]
 source = ["sidecar_search"]
 omit = ["*/tests/*", "*/conftest.py"]
+
+[tool.pyrefly]
+project-includes = ["**/*.py*"]
