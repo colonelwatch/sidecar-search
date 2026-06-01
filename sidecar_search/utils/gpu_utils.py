@@ -10,7 +10,7 @@ from threading import (
     Condition,
     Lock,
     Thread,
-    _register_atexit,  # pyright: ignore[reportAttributeAccessIssue]
+    _register_atexit,  # pyrefly: ignore[missing-module-attribute]
 )
 from types import TracebackType
 from typing import Any, Concatenate, Self, overload
@@ -298,8 +298,11 @@ class iqueue[T](Iterator[T]):
         # to support cancellation when used not as a context manager, register
         # a finalizer, but shift up on-exit call to _before_ non-daemonic
         # threads are joined (like is done in ThreadPoolExecutor)
+        # TODO: open issue on Pyrefly about how finalize stub needs to include
+        #       property setter for `atexit` (bypassing the `__slots__` issue),
+        #       then remove the error-ignore
         finalizer = weakref.finalize(self, stream.cancel)
-        finalizer.atexit = False
+        finalizer.atexit = False  # pyrefly: ignore[missing-attribute]
         with _finalizers_lock:
             _finalizers[self] = finalizer
 
