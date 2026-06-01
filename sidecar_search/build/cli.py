@@ -37,7 +37,7 @@ class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
 
 
 def _process_lines_batch(lines: Sequence[bytes]) -> DocumentIdBatch:
-    batch: DocumentIdBatch = []
+    batch: list[tuple[str, str]] = []
     for line in lines:
         row = json.loads(line)
         batch.append((row["id"], row["document"]))
