@@ -13,7 +13,7 @@ from threading import (
     _register_atexit,  # pyrefly: ignore[missing-module-attribute]
 )
 from types import TracebackType
-from typing import Any, Concatenate, Self, overload
+from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
 
 import torch
 
@@ -21,6 +21,13 @@ _finalizers: weakref.WeakKeyDictionary[Any, Callable[[], Any]] = (
     weakref.WeakKeyDictionary()
 )
 _finalizers_lock = Lock()
+
+
+if TYPE_CHECKING:
+    # since Pyrefly stub will never expose this, type-hint it ourselves
+    def _register_atexit[**P](
+        func: Callable[P, Any], *args: P.args, **kwargs: P.kwargs
+    ) -> None: ...
 
 
 def _run_finalizers() -> None:
