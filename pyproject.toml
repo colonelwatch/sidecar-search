@@ -63,3 +63,4 @@ omit = ["*/tests/*", "*/conftest.py"]
 
 [tool.pyrefly]
 project-includes = ["**/*.py*"]
+infer-return-types = "never"
