@@ -34,7 +34,9 @@ class DTypeCode(StrEnum):
             case DTypeCode.BFLOAT16:
                 return torch.bfloat16
             case _ as unrecognized:
-                assert_never(unrecognized)
+                # TODO: remove when the below PR lands in a release
+                #       https://github.com/facebook/pyrefly/issues/3392
+                assert_never(unrecognized)  # pyrefly: ignore[bad-argument-type]
                 raise ValueError(f"unrecognized dtype {unrecognized}")
 
     @classmethod
@@ -46,7 +48,8 @@ class DTypeCode(StrEnum):
             raise ValueError("unrecognized dtype") from e
 
     def to_sqlite3_decltype(self) -> LiteralString:
-        return SQLITE3_VECTOR_PREFIX + self.value
+        # TODO: report this false positive to the pyrefly repo
+        return SQLITE3_VECTOR_PREFIX + self.value  # pyrefly:ignore[bad-return]
 
     @classmethod
     def _get_inverse_mapping(cls) -> Mapping["torch.dtype", "DTypeCode"]:
