@@ -273,7 +273,7 @@ class Stream[T]:
     def get_result(self) -> T | StreamSentinel:
         with self._cv:
             self._cv.wait_for(
-                lambda: (len(self._q) > 0 or self._state is _StreamState.FINISHED)
+                lambda: len(self._q) > 0 or self._state is _StreamState.FINISHED
             )
             if len(self._q) > 0:
                 result = self._q.popleft()
