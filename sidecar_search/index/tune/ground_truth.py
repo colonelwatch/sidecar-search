@@ -6,7 +6,7 @@ import torch
 from datasets import Dataset
 from tqdm import tqdm
 
-from sidecar_search.utils.gpu_utils import imap, imap_multi_gpu, iqueue
+from sidecar_search.utils.gpu_utils import imap_multi_gpu, iqueue
 
 from ..provisioner import Provisioner
 from ..utils.datasets_utils import iter_tensors
