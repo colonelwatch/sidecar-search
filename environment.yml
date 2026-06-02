@@ -19,5 +19,7 @@ dependencies:
   - pytest>=9.0
   - pytest-benchmark~=5.0
   - coverage[toml]
+  - ruff
+  - pre-commit
   - pip:
       - -e .
