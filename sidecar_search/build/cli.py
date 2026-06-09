@@ -2,17 +2,19 @@ import json
 import sys
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from itertools import batched
+from itertools import batched, chain
 from pathlib import Path
-from typing import BinaryIO, Iterator, Literal, Sequence, cast
+from typing import Iterator, Literal, Sequence
+
+import torch
 
 from sidecar_search.args import SharedArgsMixin
 from sidecar_search.args_base import CommandArgsBase
 from sidecar_search.utils.env_utils import BF16, MODEL, TRUST_REMOTE_CODE
-from sidecar_search.utils.gpu_utils import imap
+from sidecar_search.utils.gpu_utils import iqueue
 
-from .build import build_batched
-from .encode import DocumentIdBatch, get_model
+from .db import ParallelFilter, SharedConnection, insert_as_completed
+from .encode import PipelinedEncoder, get_model
 
 
 @dataclass
@@ -36,29 +38,32 @@ class BuildArgs(SharedArgsMixin, CommandArgsBase[Literal["build"]]):
         parser.add_argument("--filter-batch-size", default=1024, type=int)
 
 
-def _process_lines_batch(lines: Sequence[bytes]) -> DocumentIdBatch:
-    batch: list[tuple[str, str]] = []
-    for line in lines:
-        row = json.loads(line)
-        batch.append((row["id"], row["document"]))
-    return batch
-
-
-def iter_documents(batch_size: int) -> Iterator[DocumentIdBatch]:
-    stdin_cast = cast(BinaryIO, sys.stdin.buffer)
-    batches = zip(batched(stdin_cast, batch_size))
-    return imap(batches, _process_lines_batch, 1)
-
-
 def build_main(args: BuildArgs) -> int:
-    batches = iter_documents(args.filter_batch_size)  # TODO: confusing naming
-    build_batched(
-        batches,
-        lambda: get_model(MODEL, BF16, TRUST_REMOTE_CODE),
-        args.data_path,
-        args.filter_tasks,
-        args.tasks,
-        args.batch_size,
-        progress=args.progress,
-    )
+    with SharedConnection(args.data_path) as conn:
+        rows = (json.loads(line) for line in sys.stdin)
+        rows = ((row["id"], row["document"]) for row in rows)
+        batches = batched(rows, args.filter_batch_size)
+        batches = iqueue(batches)
+
+        batches = ParallelFilter(conn).filter(
+            batches, n_tasks=args.filter_tasks, progress=args.progress
+        )
+        batches = _rebatch(batches, args.batch_size)
+        batches = iqueue(batches)
+
+        batches = PipelinedEncoder(
+            lambda: get_model(MODEL, BF16, TRUST_REMOTE_CODE),
+            tasks_per_gpu=args.tasks,
+        ).encode(batches)
+        batches = iqueue(batches)
+
+        insert_tasks = torch.cuda.device_count() * args.tasks
+        insert_as_completed(batches, conn, n_tasks=insert_tasks)
+
     return 0
+
+
+def _rebatch[T](
+    batches: Iterator[Sequence[T]], batch_size: int
+) -> Iterator[Sequence[T]]:
+    return batched(chain.from_iterable(batches), batch_size)
