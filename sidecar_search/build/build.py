@@ -1,6 +1,6 @@
 from itertools import batched, chain
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Sequence
 
 import torch
 from sentence_transformers import SentenceTransformer
@@ -9,6 +9,12 @@ from sidecar_search.utils.gpu_utils import iqueue
 
 from .db import ParallelFilter, SharedConnection, insert_as_completed
 from .encode import DocumentIdBatch, PipelinedEncoder
+
+
+def _rebatch[T](
+    batches: Iterator[Sequence[T]], batch_size: int
+) -> Iterator[Sequence[T]]:
+    return batched(chain.from_iterable(batches), batch_size)
 
 
 def build_batched(
@@ -28,7 +34,7 @@ def build_batched(
         batches = parallel_filter.filter(
             inputs, n_tasks=filter_tasks, progress=progress
         )
-        batches = batched(chain.from_iterable(batches), encode_batch_size)
+        batches = _rebatch(batches, encode_batch_size)
         batches = iqueue(batches)
         batches = pipelined_encoder.encode(batches)
         batches = iqueue(batches)
