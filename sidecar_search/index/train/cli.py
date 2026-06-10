@@ -70,32 +70,6 @@ class IndexTrainArgs(
             raise ValueError(f'preprocessing string "{self.preprocess}" is not valid')
 
 
-def provision_memmap(dataset: Dataset, args: IndexTrainArgs) -> NDMemmap[np.float32]:
-    n = len(dataset)
-    d = resolve_dimensions(dataset, args.dimensions)
-    provisioner = MemmapProvisioner(
-        dataset=dataset, shape=(n, d), normalize=args.normalize
-    )
-    return provisioner.provision(progress=args.progress)
-
-
-def train_index(
-    train: Dataset, factory_string: str, args: IndexTrainArgs
-) -> faiss.Index:
-    train_memmap = provision_memmap(train, args)
-
-    # doing a bit of testing seems to show that passing METRIC_L2 is superior to passing
-    # METRIC_INNER_PRODUCT for the same factory string, even for normalized embeddings
-    _, d = train_memmap.shape
-    index: faiss.Index = faiss.index_factory(d, factory_string, faiss.METRIC_L2)
-
-    index = to_gpu(index)
-    index.train(train_memmap)  # type: ignore # faiss class_wrappers.py
-    index = to_cpu(index)
-
-    return index
-
-
 def ensure_trained(dataset: Dataset, args: IndexTrainArgs):
     if args.clusters is None:
         clusters = len(dataset) // TRAIN_SIZE_MULTIPLE
@@ -107,7 +81,32 @@ def ensure_trained(dataset: Dataset, args: IndexTrainArgs):
     shuffled = dataset.shuffle(seed=42)
     train = shuffled.take(train_size)
 
-    index = train_index(train, factory_string, args)
+    train_memmap = _provision_memmap(train, args)
+    index = _train_index(train_memmap, factory_string)
     with del_on_exc([args.empty_index_path, args.untuned_params_path]):
         faiss.write_index(index, str(args.empty_index_path))
         save_params(args.untuned_params_path, args.dimensions, args.normalize, None)
+
+
+def _provision_memmap(dataset: Dataset, args: IndexTrainArgs) -> NDMemmap[np.float32]:
+    n = len(dataset)
+    d = resolve_dimensions(dataset, args.dimensions)
+    provisioner = MemmapProvisioner(
+        dataset=dataset, shape=(n, d), normalize=args.normalize
+    )
+    return provisioner.provision(progress=args.progress)
+
+
+def _train_index(
+    train_memmap: NDMemmap[np.float32], factory_string: str
+) -> faiss.Index:
+    # doing a bit of testing seems to show that passing METRIC_L2 is superior to passing
+    # METRIC_INNER_PRODUCT for the same factory string, even for normalized embeddings
+    _, d = train_memmap.shape
+    index: faiss.Index = faiss.index_factory(d, factory_string, faiss.METRIC_L2)
+
+    index = to_gpu(index)
+    index.train(train_memmap)  # type: ignore # faiss class_wrappers.py
+    index = to_cpu(index)
+
+    return index
