@@ -69,15 +69,8 @@ class IndexTuneArgs(
 def tune_index(
     index: faiss.Index, ground_truth: Dataset, args: IndexTuneArgs
 ) -> list[IndexParameters]:
-    # faiss expects float32 embeddings and int64 IDs
-    with ground_truth.formatted_as("numpy"):
-        q = cast(npt.NDArray, ground_truth._getitem("embedding")).astype(np.float32)
-        gt_ids = cast(npt.NDArray, ground_truth._getitem("gt_ids")).astype(np.int64)
-
-    if args.dimensions is not None:
-        q = q[:, : args.dimensions]
-    if args.normalize:
-        q = q / np.linalg.norm(q, ord=2, axis=1)[:, np.newaxis]
+    dimensions: int = index.d
+    q, gt_ids = ground_truth_to_faiss(ground_truth, dimensions, args.normalize)
 
     # init with ground-truth IDs but not ground-truth distances because faiss doesn't
     # use them anyway (see faiss/AutoTune.cpp)
@@ -95,7 +88,31 @@ def tune_index(
         "faiss violated documentation about return type"
     )
 
-    pareto_vector: faiss.OperatingPointVector = results.optimal_pts
+    return serialize_operating_points(results)
+
+
+def ground_truth_to_faiss(
+    ground_truth: Dataset, dimensions: int, normalize: bool
+) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.int64]]:
+    # faiss expects float32 embeddings and int64 IDs
+    with ground_truth.formatted_as("numpy"):
+        gt_queries = cast(npt.NDArray, ground_truth._getitem("embedding")).astype(
+            np.float32
+        )
+        gt_ids = cast(npt.NDArray, ground_truth._getitem("gt_ids")).astype(np.int64)
+
+    gt_queries = gt_queries[:, :dimensions]
+
+    if normalize:
+        gt_queries = (
+            gt_queries / np.linalg.norm(gt_queries, ord=2, axis=1)[:, np.newaxis]
+        )
+
+    return gt_queries, gt_ids
+
+
+def serialize_operating_points(points: faiss.OperatingPoints) -> list[IndexParameters]:
+    pareto_vector: faiss.OperatingPointVector = points.optimal_pts
     optimal_params: list[IndexParameters] = []
     for i in range(pareto_vector.size()):
         point: faiss.OperatingPoint = pareto_vector.at(i)
@@ -103,7 +120,6 @@ def tune_index(
             recall=point.perf, exec_time=(0.001 * point.t), param_string=point.key
         )
         optimal_params.append(params)
-
     return optimal_params
 
 
