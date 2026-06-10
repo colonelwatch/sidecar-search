@@ -29,7 +29,6 @@ class IndexTuneArgs(
     queries: int
 
     # not args
-    one_recall_at_one: bool = field(init=False, compare=False)
     k: int = field(init=False, compare=False)
     dimensions: int | None = field(init=False, compare=False)
     normalize: bool = field(init=False, compare=False)
@@ -53,6 +52,7 @@ class IndexTuneArgs(
                 f'untuned params "{self.untuned_params_path}" does not exist'
             )
 
+        self.k = self.intersection if self.intersection is not None else 1
         if self.intersection is None:
             self.one_recall_at_one = True
             self.k = 1
@@ -67,28 +67,34 @@ class IndexTuneArgs(
 
 
 def tune_index(
-    index: faiss.Index, ground_truth: Dataset, args: IndexTuneArgs
-) -> list[IndexParameters]:
-    dimensions: int = index.d
-    q, gt_ids = ground_truth_to_faiss(ground_truth, dimensions, args.normalize)
+    index: faiss.Index,
+    gt_queries: npt.NDArray[np.float32],
+    gt_ids: npt.NDArray[np.int64],
+    intersection: int | None,
+    progress: bool = False,
+) -> faiss.OperatingPoints:
+    if len(gt_queries) != len(gt_ids):
+        raise ValueError("gt_queries and gt_ids do not have matching lengths")
+
+    n = len(gt_queries)
 
     # init with ground-truth IDs but not ground-truth distances because faiss doesn't
     # use them anyway (see faiss/AutoTune.cpp)
-    if args.one_recall_at_one:
-        crit = faiss.OneRecallAtRCriterion(len(ground_truth), 1)
+    if intersection is None:
+        crit = faiss.OneRecallAtRCriterion(n, 1)
     else:
-        crit = faiss.IntersectionCriterion(len(ground_truth), args.k)
+        crit = faiss.IntersectionCriterion(n, intersection)
     crit.set_groundtruth(None, gt_ids)  # type: ignore # faiss class_wrappers.py
 
     p_space = faiss.ParameterSpace()
-    p_space.verbose = args.progress
+    p_space.verbose = progress
     p_space.initialize(index)
-    results = p_space.explore(index, q, crit)  # type: ignore # faiss class_wrappers.py
+    results = p_space.explore(index, gt_queries, crit)  # type: ignore # faiss class_wrappers.py
     assert isinstance(results, faiss.OperatingPoints), (
         "faiss violated documentation about return type"
     )
 
-    return serialize_operating_points(results)
+    return results
 
 
 def ground_truth_to_faiss(
@@ -149,7 +155,11 @@ def ensure_tuned(dataset: Dataset, args: IndexTuneArgs) -> None:
     )
     merged_index = provisioner.provision(progress=args.progress).open()
 
-    optimal_params = tune_index(merged_index, ground_truth, args)
+    gt_queries, gt_ids = ground_truth_to_faiss(ground_truth, dimensions, args.normalize)
+    results = tune_index(
+        merged_index, gt_queries, gt_ids, args.intersection, progress=args.progress
+    )
+    optimal_params = serialize_operating_points(results)
 
     with del_on_exc(args.params_path):
         save_params(args.params_path, args.dimensions, args.normalize, optimal_params)
