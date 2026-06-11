@@ -51,12 +51,6 @@ class IndexTuneArgs(
             )
 
         self.k = self.intersection if self.intersection is not None else 1
-        if self.intersection is None:
-            self.one_recall_at_one = True
-            self.k = 1
-        else:
-            self.one_recall_at_one = False
-            self.k = self.intersection
 
         with open(self.untuned_params_path) as f:
             params: Params = json.load(f)
