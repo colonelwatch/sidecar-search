@@ -4,9 +4,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
-import faiss
-import numpy as np
-import numpy.typing as npt
 import torch
 from datasets import Dataset
 
@@ -15,9 +12,10 @@ from sidecar_search.utils.contextmanager_utils import del_on_exc
 
 from ..args import IndexSharedArgsMixin
 from ..make import MakeIndexProvisioner
-from ..parameters import IndexParameters, Params, save_params
+from ..parameters import Params, save_params
 from ..utils.datasets_utils import resolve_dimensions
-from .ground_truth import GroundTruthProvisioner
+from .ground_truth import GroundTruthProvisioner, ground_truth_to_faiss
+from .tune import serialize_operating_points, tune_index
 
 
 @dataclass
@@ -64,69 +62,6 @@ class IndexTuneArgs(
             params: Params = json.load(f)
         self.dimensions = params["dimensions"]
         self.normalize = params["normalize"]
-
-
-def tune_index(
-    index: faiss.Index,
-    gt_queries: npt.NDArray[np.float32],
-    gt_ids: npt.NDArray[np.int64],
-    intersection: int | None,
-    progress: bool = False,
-) -> faiss.OperatingPoints:
-    if len(gt_queries) != len(gt_ids):
-        raise ValueError("gt_queries and gt_ids do not have matching lengths")
-
-    n = len(gt_queries)
-
-    # init with ground-truth IDs but not ground-truth distances because faiss doesn't
-    # use them anyway (see faiss/AutoTune.cpp)
-    if intersection is None:
-        crit = faiss.OneRecallAtRCriterion(n, 1)
-    else:
-        crit = faiss.IntersectionCriterion(n, intersection)
-    crit.set_groundtruth(None, gt_ids)  # type: ignore # faiss class_wrappers.py
-
-    p_space = faiss.ParameterSpace()
-    p_space.verbose = progress
-    p_space.initialize(index)
-    results = p_space.explore(index, gt_queries, crit)  # type: ignore # faiss class_wrappers.py
-    assert isinstance(results, faiss.OperatingPoints), (
-        "faiss violated documentation about return type"
-    )
-
-    return results
-
-
-def ground_truth_to_faiss(
-    ground_truth: Dataset, dimensions: int, normalize: bool
-) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.int64]]:
-    # faiss expects float32 embeddings and int64 IDs
-    with ground_truth.formatted_as("numpy"):
-        gt_queries = cast(npt.NDArray, ground_truth._getitem("embedding")).astype(
-            np.float32
-        )
-        gt_ids = cast(npt.NDArray, ground_truth._getitem("gt_ids")).astype(np.int64)
-
-    gt_queries = gt_queries[:, :dimensions]
-
-    if normalize:
-        gt_queries = (
-            gt_queries / np.linalg.norm(gt_queries, ord=2, axis=1)[:, np.newaxis]
-        )
-
-    return gt_queries, gt_ids
-
-
-def serialize_operating_points(points: faiss.OperatingPoints) -> list[IndexParameters]:
-    pareto_vector: faiss.OperatingPointVector = points.optimal_pts
-    optimal_params: list[IndexParameters] = []
-    for i in range(pareto_vector.size()):
-        point: faiss.OperatingPoint = pareto_vector.at(i)
-        params = IndexParameters(  # converts from ms to seconds
-            recall=point.perf, exec_time=(0.001 * point.t), param_string=point.key
-        )
-        optimal_params.append(params)
-    return optimal_params
 
 
 def ensure_tuned(dataset: Dataset, args: IndexTuneArgs) -> None:

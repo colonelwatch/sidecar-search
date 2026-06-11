@@ -2,6 +2,8 @@ from collections.abc import Generator, Iterator
 from functools import reduce
 from typing import TypedDict, Unpack, cast
 
+import numpy as np
+import numpy.typing as npt
 import torch
 from datasets import Dataset
 from tqdm import tqdm
@@ -165,3 +167,23 @@ class GroundTruthProvisioner(Provisioner[Dataset]):
 
     def _compute_cache_filename(self) -> str:
         return f"gt_{self._compute_cache_hash()}"
+
+
+def ground_truth_to_faiss(
+    ground_truth: Dataset, dimensions: int, normalize: bool
+) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.int64]]:
+    # faiss expects float32 embeddings and int64 IDs
+    with ground_truth.formatted_as("numpy"):
+        gt_queries = cast(npt.NDArray, ground_truth._getitem("embedding")).astype(
+            np.float32
+        )
+        gt_ids = cast(npt.NDArray, ground_truth._getitem("gt_ids")).astype(np.int64)
+
+    gt_queries = gt_queries[:, :dimensions]
+
+    if normalize:
+        gt_queries = (
+            gt_queries / np.linalg.norm(gt_queries, ord=2, axis=1)[:, np.newaxis]
+        )
+
+    return gt_queries, gt_ids
