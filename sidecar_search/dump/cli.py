@@ -1,74 +1,68 @@
-from argparse import ArgumentParser
-from dataclasses import dataclass
-from pathlib import Path
 from shutil import rmtree
-from sys import stderr
-from typing import Literal
+from typing import Self
 
-from sidecar_search.args import SharedArgsMixin
-from sidecar_search.args_base import CommandArgsBase
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    DirectoryPath,
+    Field,
+    FilePath,
+    NewPath,
+    PrivateAttr,
+    model_validator,
+)
+from pydantic_settings import CliPositionalArg
+
+from sidecar_search.args import CommonMixin
 from sidecar_search.utils.env_utils import BF16
 
 from .database import dump_database
 from .dataset import dump_dataset
 
 
-@dataclass
-class DumpArgs(SharedArgsMixin, CommandArgsBase[Literal["dump"]]):
-    source: Path
-    dest: Path
-    batch_size: int
-    shard_size: int
-    row_group_size: int
-    enforce_dtype: bool
+class Dump(CommonMixin, BaseModel):
+    source: CliPositionalArg[DirectoryPath | FilePath]
+    dest: CliPositionalArg[NewPath]
+    batch_size: int = Field(1024, validation_alias=AliasChoices("b", "batch-size"))
+    shard_size: int = Field(  # under 4GB
+        4194304, validation_alias=AliasChoices("s", "shard-size")
+    )
+    row_group_size: int = 262144
+    enforce_dtype: bool = True
 
-    @classmethod
-    def configure_parser(cls, parser: ArgumentParser) -> None:
-        super().configure_parser(parser)
-        parser.add_argument("source", type=Path)
-        parser.add_argument("dest", type=Path)
-        parser.add_argument("-b", "--batch-size", default=1024, type=int)
-        parser.add_argument(
-            "-s", "--shard-size", default=4194304, type=int
-        )  # under 4GB
-        parser.add_argument(
-            "--row-group-size", default=262144, type=int
-        )  # around 128MB
-        parser.add_argument(
-            "--no-enforce-dtype", action="store_false", dest="enforce_dtype"
-        )
+    _to_dataset: bool = PrivateAttr()
 
-    def __post_init__(self) -> None:
-        if not self.source.exists():
-            raise ValueError(f'source path "{self.source}" does not exist')
-        if self.dest.exists():
-            raise ValueError(f'destination path "{self.dest}" exists')
+    @model_validator(mode="after")
+    def check_direction(self) -> Self:
+        if self.source.suffix == ".sqlite" and self.dest.suffix == "":
+            self._to_dataset = True
+        elif self.source.suffix == "" and self.dest.suffix == ".sqlite":
+            self._to_dataset = False
+        else:
+            raise ValueError("invalid source and destination types")
+        return self
 
+    def cli_cmd(self) -> None:
+        source = self.source
+        dest = self.dest
 
-def dump_main(args: DumpArgs) -> int:
-    source = args.source
-    dest = args.dest
+        if self.enforce_dtype:
+            enforce = "bf16" if BF16 else "fp16"
+        else:
+            enforce = None
 
-    if args.enforce_dtype:
-        enforce = "bf16" if BF16 else "fp16"
-    else:
-        enforce = None
-
-    if source.suffix == ".sqlite" and dest.suffix == "":
-        dest.mkdir()
-        try:
-            dump_database(source, dest, args.shard_size, args.row_group_size, enforce)
-        except (KeyboardInterrupt, Exception):
-            rmtree(dest)
-            raise
-    elif source.suffix == "" and dest.suffix == ".sqlite":
-        try:
-            dump_dataset(source, dest, args.batch_size, enforce)
-        except (KeyboardInterrupt, Exception):
-            dest.unlink()
-            raise
-    else:
-        print("error: invalid source and destination types", file=stderr)
-        return 1
-
-    return 0
+        if self._to_dataset:
+            dest.mkdir()
+            try:
+                dump_database(
+                    source, dest, self.shard_size, self.row_group_size, enforce
+                )
+            except (KeyboardInterrupt, Exception):
+                rmtree(dest)
+                raise
+        else:
+            try:
+                dump_dataset(source, dest, self.batch_size, enforce)
+            except (KeyboardInterrupt, Exception):
+                dest.unlink()
+                raise

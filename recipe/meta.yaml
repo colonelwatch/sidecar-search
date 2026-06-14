@@ -25,6 +25,8 @@ requirements:
     - pyarrow
     - faiss-gpu ~=1.9.0
     - datasets >=3.3.2
+    - pydantic
+    - pydantic-settings
 
 test:
   imports:

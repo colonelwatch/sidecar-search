@@ -1,20 +1,24 @@
 import re
-import warnings
-from argparse import ArgumentParser
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Literal
+from typing import Self, override
 
 import faiss
 import numpy as np
 from datasets import Dataset
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    DirectoryPath,
+    Field,
+    PrivateAttr,
+    model_validator,
+)
+from pydantic_settings import CliPositionalArg
 
-from sidecar_search.args_base import SubcommandArgsBase
 from sidecar_search.utils.contextmanager_utils import del_on_exc
 
-from ..args import IndexSharedArgsMixin
+from ..args import IndexMixin
 from ..parameters import save_params
-from ..utils.datasets_utils import resolve_dimensions
+from ..utils.datasets_utils import load_dataset, resolve_dimensions
 from ..utils.faiss_utils import to_cpu, to_gpu
 from .memmap import MemmapProvisioner, NDMemmap
 
@@ -25,76 +29,76 @@ GPU_OPQ_WIDTHS = [1, 2, 3, 4, 8, 12, 16, 20, 24, 28, 32, 48, 56, 64, 96]  # GPU 
 
 
 # TODO: make a mixin for source, distinct from clean command
-@dataclass
-class IndexTrainArgs(
-    IndexSharedArgsMixin, SubcommandArgsBase[Literal["index"], Literal["train"]]
-):
-    source: Path
-    dimensions: int | None  # matryoshka
-    normalize: bool  # also if normalize_d_
-    preprocess: str
-    clusters: int | None
+class IndexTrain(IndexMixin, BaseModel):
+    source: CliPositionalArg[DirectoryPath]
+    dimensions: int | None = Field(  # matryoshka
+        None, validation_alias=AliasChoices("d", "dimensions")
+    )
+    normalize: bool = Field(False, validation_alias=AliasChoices("N", "normalize"))
+    preprocess: str = Field(
+        "OPQ96_384", validation_alias=AliasChoices("p", "preprocess")
+    )
+    clusters: int | None = Field(None, validation_alias=AliasChoices("c", "clusters"))
 
-    # not args
-    ivf_encoding: str = field(init=False, compare=False)
-    encoding_width: int = field(init=False, compare=False)
+    _coerced_normalize: bool = PrivateAttr(False)
+    _ivf_encoding: str = PrivateAttr()
 
-    @classmethod
-    def configure_parser(cls, parser: ArgumentParser) -> None:
-        super().configure_parser(parser)
-        parser.add_argument("source", type=Path)
-        parser.add_argument("-d", "--dimensions", default=None, type=int)
-        parser.add_argument("-N", "--normalize", action="store_true")
-        parser.add_argument("-p", "--preprocess", default="OPQ96_384")
-        parser.add_argument("-c", "--clusters", default=None, type=int)
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        if not self.source.exists():
-            raise ValueError(f'source path "{self.source}" does not exist')
-
+    @model_validator(mode="after")
+    def coerce_normalize(self) -> Self:
         if self.dimensions is not None and not self.normalize:
             self.normalize = True
-            warnings.warn("inferring --normalize from --dimension")
+            self._coerced_normalize = True
+        return self
 
+    @model_validator(mode="after")
+    def match_preprocess(self) -> Self:
         if match := OPQ_PATTERN.match(self.preprocess):
-            self.ivf_encoding = f"PQ{match[1]}"
-            self.encoding_width = int(match[1])
-            if self.encoding_width not in GPU_OPQ_WIDTHS:
-                raise ValueError(f"OPQ width {self.encoding_width} is not valid")
+            self._ivf_encoding = f"PQ{match[1]}"
+            encoding_width = int(match[1])
+            if encoding_width not in GPU_OPQ_WIDTHS:
+                raise ValueError(f"OPQ width {encoding_width} is not valid")
         elif match := RR_PATTERN.match(self.preprocess):
-            self.ivf_encoding = "SQ8"
-            self.encoding_width = int(match[1])
+            self._ivf_encoding = "SQ8"
+            encoding_width = int(match[1])
         else:
             raise ValueError(f'preprocessing string "{self.preprocess}" is not valid')
+        return self
+
+    @override
+    def cli_cmd(self) -> None:
+        super().cli_cmd()
+
+        dataset = load_dataset(self.source)
+
+        if self.clusters is None:
+            clusters = len(dataset) // TRAIN_SIZE_MULTIPLE
+        else:
+            clusters = self.clusters
+        factory_string = f"{self.preprocess},IVF{clusters},{self._ivf_encoding}"
+        train_size = TRAIN_SIZE_MULTIPLE * clusters
+
+        shuffled = dataset.shuffle(seed=42)
+        train = shuffled.take(train_size)
+
+        train_memmap = _provision_memmap(
+            train, self.dimensions, self.normalize, progress=self.progress
+        )
+        index = _train_index(train_memmap, factory_string)
+        with del_on_exc([self.empty_index_path, self.untuned_params_path]):
+            faiss.write_index(index, str(self.empty_index_path))
+            save_params(self.untuned_params_path, self.dimensions, self.normalize, None)
 
 
-def ensure_trained(dataset: Dataset, args: IndexTrainArgs):
-    if args.clusters is None:
-        clusters = len(dataset) // TRAIN_SIZE_MULTIPLE
-    else:
-        clusters = args.clusters
-    factory_string = f"{args.preprocess},IVF{clusters},{args.ivf_encoding}"
-    train_size = TRAIN_SIZE_MULTIPLE * clusters
-
-    shuffled = dataset.shuffle(seed=42)
-    train = shuffled.take(train_size)
-
-    train_memmap = _provision_memmap(train, args)
-    index = _train_index(train_memmap, factory_string)
-    with del_on_exc([args.empty_index_path, args.untuned_params_path]):
-        faiss.write_index(index, str(args.empty_index_path))
-        save_params(args.untuned_params_path, args.dimensions, args.normalize, None)
-
-
-def _provision_memmap(dataset: Dataset, args: IndexTrainArgs) -> NDMemmap[np.float32]:
+def _provision_memmap(
+    dataset: Dataset,
+    dimensions: int | None,
+    normalize: bool,
+    progress: bool = False,
+) -> NDMemmap[np.float32]:
     n = len(dataset)
-    d = resolve_dimensions(dataset, args.dimensions)
-    provisioner = MemmapProvisioner(
-        dataset=dataset, shape=(n, d), normalize=args.normalize
-    )
-    return provisioner.provision(progress=args.progress)
+    d = resolve_dimensions(dataset, dimensions)
+    provisioner = MemmapProvisioner(dataset=dataset, shape=(n, d), normalize=normalize)
+    return provisioner.provision(progress=progress)
 
 
 def _train_index(

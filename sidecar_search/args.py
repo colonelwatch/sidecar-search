@@ -1,14 +1,5 @@
-from argparse import ArgumentParser
-from dataclasses import dataclass
-
-from .args_base import ArgsMixinBase
+from pydantic import AliasChoices, BaseModel, Field
 
 
-@dataclass
-class SharedArgsMixin(ArgsMixinBase):
-    progress: bool
-
-    @classmethod
-    def configure_parser(cls, parser: ArgumentParser) -> None:
-        super().configure_parser(parser)
-        parser.add_argument("-P", "--progress", action="store_true")
+class CommonMixin(BaseModel):
+    progress: bool = Field(False, validation_alias=AliasChoices("P", "progress"))

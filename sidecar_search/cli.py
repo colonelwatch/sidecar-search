@@ -1,55 +1,31 @@
-from argparse import ArgumentParser
-from dataclasses import dataclass
-from sys import stderr
-from typing import assert_never, cast, get_args
+from pydantic_settings import BaseSettings, CliApp, CliSubCommand, SettingsConfigDict
 
-from .args import SharedArgsMixin
-from .args_base import ArgsBase
-from .build.cli import BuildArgs, build_main
-from .dump.cli import DumpArgs, dump_main
-from .index.cli import AllIndexSubcommandArgs, IndexGroupArgs, index_main
-from .init.cli import InitArgs, init_main
-
-AllCommandArgs = InitArgs | BuildArgs | IndexGroupArgs | DumpArgs
-AllArgs = InitArgs | BuildArgs | AllIndexSubcommandArgs | DumpArgs
-
-ALL_COMMAND_ARGS = cast(tuple[type[AllCommandArgs], ...], get_args(AllCommandArgs))
+from .build.cli import Build
+from .dump.cli import Dump
+from .index.cli import Index
+from .init.cli import Init
 
 
-# TODO: make pre-configured parser in args_base?
-# TODO: add prog, description, etc
-def make_parser() -> ArgumentParser:
-    return ArgumentParser(conflict_handler="error")
+class SidecarSearch(BaseSettings):
+    init: CliSubCommand[Init]
+    build: CliSubCommand[Build]
+    index: CliSubCommand[Index]
+    dump: CliSubCommand[Dump]
 
+    model_config = SettingsConfigDict(
+        frozen=True,
+        case_sensitive=True,
+        cli_hide_none_type=True,
+        cli_avoid_json=True,
+        cli_enforce_required=True,
+        cli_implicit_flags="toggle",
+        cli_kebab_case=True,
+    )
 
-@dataclass
-class CliArgs(SharedArgsMixin, ArgsBase):
-    @classmethod
-    def configure_parser(cls, parser: ArgumentParser) -> None:
-        super().configure_parser(parser)
-        cls._add_commands(parser, ALL_COMMAND_ARGS)
+    def cli_cmd(self) -> None:
+        CliApp.run_subcommand(self)
 
 
 def main() -> int:
-    parser = make_parser()
-    CliArgs.configure_parser(parser)
-    args = parser.parse_args()
-    try:
-        args = cast(AllArgs, CliArgs.from_namespace(args))
-    except ValueError as e:  # TODO: make my own exception class?
-        print("error:", e.args[0], file=stderr)
-        return 2
-
-    match args.command:
-        case "init":
-            ret = init_main(args)
-        case "build":
-            ret = build_main(args)
-        case "dump":
-            ret = dump_main(args)
-        case "index":
-            ret = index_main(args)
-        case _:
-            assert_never(args.command)
-
-    return ret
+    CliApp.run(SidecarSearch)
+    return 0

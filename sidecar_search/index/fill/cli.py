@@ -1,73 +1,62 @@
 import json
-from argparse import ArgumentParser
-from dataclasses import dataclass, field
 from pathlib import Path
 from shutil import copy
-from typing import Literal
+from typing import Self, override
 
 from datasets import Dataset
+from pydantic import BaseModel, DirectoryPath, model_validator
+from pydantic_settings import CliPositionalArg
 
-from sidecar_search.args_base import SubcommandArgsBase
 from sidecar_search.utils.contextmanager_utils import del_on_exc
 
-from ..args import IndexSharedArgsMixin
+from ..args import IndexMixin
 from ..make import MakeIndexProvisioner
 from ..parameters import Params
-from ..utils.datasets_utils import BATCH_SIZE, resolve_dimensions
+from ..utils.datasets_utils import BATCH_SIZE, load_dataset, resolve_dimensions
 
 
-@dataclass
-class IndexFillArgs(
-    IndexSharedArgsMixin, SubcommandArgsBase[Literal["index"], Literal["fill"]]
-):
-    source: Path
+class IndexFill(IndexMixin, BaseModel):
+    source: CliPositionalArg[DirectoryPath]
 
-    # not args
-    dimensions: int | None = field(init=False, compare=False)
-    normalize: bool = field(init=False, compare=False)
-
-    @classmethod
-    def configure_parser(cls, parser: ArgumentParser) -> None:
-        super().configure_parser(parser)
-        parser.add_argument("source", type=Path)
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        if not self.source.exists():
-            raise ValueError(f'source path "{self.source}" does not exist')
+    @model_validator(mode="after")
+    def check_inputs_exist(self) -> Self:
         if not self.empty_index_path.exists():
             raise ValueError(f'empty index "{self.empty_index_path}" does not exist')
         if not self.untuned_params_path.exists():
             raise ValueError(
                 f'untuned params "{self.untuned_params_path}" does not exist'
             )
+        return self
+
+    @override
+    def cli_cmd(self) -> None:
+        super().cli_cmd()
 
         with open(self.untuned_params_path) as f:
             params: Params = json.load(f)
-        self.dimensions = params["dimensions"]
-        self.normalize = params["normalize"]
+        dimensions = params["dimensions"]
+        normalize = params["normalize"]
+
+        dataset = load_dataset(self.source)
+
+        dimensions = resolve_dimensions(dataset, dimensions)
+        provisioner = MakeIndexProvisioner(
+            empty_index_path=self.empty_index_path,
+            dataset=dataset,
+            holdouts=None,
+            d=dimensions,
+            normalize=normalize,
+        )
+        output = provisioner.provision(progress=self.progress)
+
+        index_path, ondisk_path = self.index_paths
+
+        with del_on_exc([self.ids_path, index_path, ondisk_path]):
+            _save_ids(self.ids_path, dataset)
+            copy(output.index_path, index_path)
+            copy(output.ondisk_path, ondisk_path)
 
 
-def save_ids(path: Path, dataset: Dataset):
+def _save_ids(path: Path, dataset: Dataset):
     # only the id column is needed to run the index
     dataset.select_columns("id").to_parquet(path, BATCH_SIZE, compression="lz4")
-
-
-def ensure_filled(dataset: Dataset, args: IndexFillArgs) -> None:
-    dimensions = resolve_dimensions(dataset, args.dimensions)
-    provisioner = MakeIndexProvisioner(
-        empty_index_path=args.empty_index_path,
-        dataset=dataset,
-        holdouts=None,
-        d=dimensions,
-        normalize=args.normalize,
-    )
-    output = provisioner.provision(progress=args.progress)
-
-    index_path, ondisk_path = args.index_paths
-
-    with del_on_exc([args.ids_path, index_path, ondisk_path]):
-        save_ids(args.ids_path, dataset)
-        copy(output.index_path, index_path)
-        copy(output.ondisk_path, ondisk_path)

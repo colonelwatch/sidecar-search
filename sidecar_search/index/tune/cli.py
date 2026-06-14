@@ -1,94 +1,82 @@
 import json
-from argparse import ArgumentParser
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Literal, cast
+from typing import Self, cast, override
 
 import torch
-from datasets import Dataset
+from pydantic import AliasChoices, BaseModel, DirectoryPath, Field, model_validator
+from pydantic_settings import CliPositionalArg
 
-from sidecar_search.args_base import SubcommandArgsBase
 from sidecar_search.utils.contextmanager_utils import del_on_exc
 
-from ..args import IndexSharedArgsMixin
+from ..args import IndexMixin
 from ..make import MakeIndexProvisioner
 from ..parameters import Params, save_params
-from ..utils.datasets_utils import resolve_dimensions
+from ..utils.datasets_utils import load_dataset, resolve_dimensions
 from .ground_truth import GroundTruthProvisioner, ground_truth_to_faiss
 from .tune import serialize_operating_points, tune_index
 
 
-@dataclass
-class IndexTuneArgs(
-    IndexSharedArgsMixin, SubcommandArgsBase[Literal["index"], Literal["tune"]]
-):
-    source: Path
-    intersection: int | None  # 1R@1 else kR@k
-    queries: int
+class IndexTune(IndexMixin, BaseModel):
+    source: CliPositionalArg[DirectoryPath]
+    intersection: int | None = Field(  # 1R1 else kR@k
+        None, validation_alias=AliasChoices("k", "intersection")
+    )
+    queries: int = Field(8192, validation_alias=AliasChoices("q", "queries"))
 
-    # not args
-    k: int = field(init=False, compare=False)
-    dimensions: int | None = field(init=False, compare=False)
-    normalize: bool = field(init=False, compare=False)
-
-    @classmethod
-    def configure_parser(cls, parser: ArgumentParser) -> None:
-        super().configure_parser(parser)
-        parser.add_argument("source", type=Path)
-        parser.add_argument("-k", "--intersection", default=None, type=int)
-        parser.add_argument("-q", "--queries", default=8192, type=int)
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-
-        if not self.source.exists():
-            raise ValueError(f'source path "{self.source}" does not exist')
+    @model_validator(mode="after")
+    def check_inputs_exist(self) -> Self:
         if not self.empty_index_path.exists():
             raise ValueError(f'empty index "{self.empty_index_path}" does not exist')
         if not self.untuned_params_path.exists():
             raise ValueError(
                 f'untuned params "{self.untuned_params_path}" does not exist'
             )
+        return self
 
-        self.k = self.intersection if self.intersection is not None else 1
+    @property
+    def k(self) -> int:
+        return 1 if self.intersection is None else self.intersection
+
+    @override
+    def cli_cmd(self) -> None:
+        super().cli_cmd()
 
         with open(self.untuned_params_path) as f:
             params: Params = json.load(f)
-        self.dimensions = params["dimensions"]
-        self.normalize = params["normalize"]
+        dimensions: int | None = params["dimensions"]
+        normalize: bool = params["normalize"]
 
+        dataset = load_dataset(self.source)
 
-def ensure_tuned(dataset: Dataset, args: IndexTuneArgs) -> None:
-    # the queries is to be held out from the making of a provisional index
-    queries = dataset.shuffle(seed=42).skip(len(dataset) - args.queries)
+        # the queries is to be held out from the making of a provisional index
+        queries = dataset.shuffle(seed=42).skip(len(dataset) - self.queries)
 
-    # NOTE: for normalized vectors, L2-minimizing == IP-maximizing
-    provisioner = GroundTruthProvisioner(
-        dataset=dataset,
-        queries=queries,
-        do_inner_product_search=args.normalize,
-        k=args.k,
-    )
-    ground_truth = provisioner.provision(progress=args.progress)
+        # NOTE: for normalized vectors, L2-minimizing == IP-maximizing
+        provisioner = GroundTruthProvisioner(
+            dataset=dataset,
+            queries=queries,
+            do_inner_product_search=normalize,
+            k=self.k,
+        )
+        ground_truth = provisioner.provision(progress=self.progress)
 
-    with queries.formatted_as("torch"):
-        q_ids = cast(torch.Tensor, queries._getitem("index"))
+        with queries.formatted_as("torch"):
+            q_ids = cast(torch.Tensor, queries._getitem("index"))
 
-    dimensions = resolve_dimensions(dataset, args.dimensions)
-    provisioner = MakeIndexProvisioner(
-        empty_index_path=args.empty_index_path,
-        dataset=dataset,
-        holdouts=q_ids,
-        d=dimensions,
-        normalize=args.normalize,
-    )
-    merged_index = provisioner.provision(progress=args.progress).open()
+        dimensions = resolve_dimensions(dataset, dimensions)
+        provisioner = MakeIndexProvisioner(
+            empty_index_path=self.empty_index_path,
+            dataset=dataset,
+            holdouts=q_ids,
+            d=dimensions,
+            normalize=normalize,
+        )
+        merged_index = provisioner.provision(progress=self.progress).open()
 
-    gt_queries, gt_ids = ground_truth_to_faiss(ground_truth, dimensions, args.normalize)
-    results = tune_index(
-        merged_index, gt_queries, gt_ids, args.intersection, progress=args.progress
-    )
-    optimal_params = serialize_operating_points(results)
+        gt_queries, gt_ids = ground_truth_to_faiss(ground_truth, dimensions, normalize)
+        results = tune_index(
+            merged_index, gt_queries, gt_ids, self.intersection, progress=self.progress
+        )
+        optimal_params = serialize_operating_points(results)
 
-    with del_on_exc(args.params_path):
-        save_params(args.params_path, args.dimensions, args.normalize, optimal_params)
+        with del_on_exc(self.params_path):
+            save_params(self.params_path, dimensions, normalize, optimal_params)

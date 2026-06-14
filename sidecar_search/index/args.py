@@ -1,27 +1,18 @@
-from argparse import ArgumentParser
-from dataclasses import dataclass
+from abc import ABC, abstractmethod
 from pathlib import Path
 
-from sidecar_search.args import SharedArgsMixin
+from datasets import disable_progress_bars
+from pydantic import AliasChoices, BaseModel, DirectoryPath, Field, NewPath
+
+from sidecar_search.args import CommonMixin
+from sidecar_search.utils.cache_utils import seal_hf_cache, seal_persistent_cache
 
 
-@dataclass
-class IndexSharedArgsMixin(SharedArgsMixin):
-    build_dir: Path
-    use_cache: bool  # for experiments only
-
-    @classmethod
-    def configure_parser(cls, parser: ArgumentParser) -> None:
-        super().configure_parser(parser)
-        parser.add_argument("-B", "--build-dir", default=Path("."), type=Path)
-        parser.add_argument("--use-cache", action="store_true")
-
-    # TODO: rethink __post_init__ inheritance
-    def __post_init__(self) -> None:
-        if self.build_dir.exists() and not self.build_dir.is_dir():
-            raise ValueError(
-                f'build dir "{self.build_dir}" exists but is not a directory'
-            )
+class IndexMixin(CommonMixin, BaseModel, ABC):
+    build_dir: NewPath | DirectoryPath = Field(
+        Path("."), validation_alias=AliasChoices("B", "build-dir")
+    )
+    use_cache: bool = False  # for experiments only
 
     @property
     def empty_index_path(self) -> Path:
@@ -42,3 +33,12 @@ class IndexSharedArgsMixin(SharedArgsMixin):
     @property
     def index_paths(self) -> tuple[Path, Path]:
         return self.build_dir / "index.faiss", self.build_dir / "ondisk.ivfdata"
+
+    @abstractmethod
+    def cli_cmd(self) -> None:
+        if not self.use_cache:
+            seal_hf_cache()
+            seal_persistent_cache()
+        if not self.progress:
+            disable_progress_bars()
+        self.build_dir.mkdir(exist_ok=True)
