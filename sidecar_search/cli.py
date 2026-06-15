@@ -1,4 +1,7 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, CliApp, CliSubCommand, SettingsConfigDict
+
+from sidecar_search.utils.cli_utils import extract_short_description
 
 from .build.cli import Build
 from .dump.cli import Dump
@@ -7,10 +10,12 @@ from .init.cli import Init
 
 
 class SidecarSearch(BaseSettings):
-    init: CliSubCommand[Init]
-    build: CliSubCommand[Build]
-    index: CliSubCommand[Index]
-    dump: CliSubCommand[Dump]
+    """CLI build tools for sidecar indexes to add semantic search to anything."""
+
+    init: CliSubCommand[Init] = Field(description=extract_short_description(Init))
+    build: CliSubCommand[Build] = Field(description=extract_short_description(Build))
+    index: CliSubCommand[Index] = Field(description=extract_short_description(Index))
+    dump: CliSubCommand[Dump] = Field(description=extract_short_description(Dump))
 
     model_config = SettingsConfigDict(
         frozen=True,

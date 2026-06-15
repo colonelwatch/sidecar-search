@@ -16,11 +16,21 @@ from .tune import serialize_operating_points, tune_index
 
 
 class IndexTune(IndexMixin, BaseModel):
-    source: CliPositionalArg[DirectoryPath]
-    intersection: int | None = Field(  # 1R1 else kR@k
-        None, validation_alias=AliasChoices("k", "intersection")
+    """Find tuned parameters for a trained index and a dataset."""
+
+    source: CliPositionalArg[DirectoryPath] = Field(
+        description="HuggingFace dataset to tune on"
     )
-    queries: int = Field(8192, validation_alias=AliasChoices("q", "queries"))
+    intersection: int | None = Field(  # 1R1 else kR@k
+        None,
+        validation_alias=AliasChoices("k", "intersection"),
+        description="use k-recall@k as the tuning criterion",
+    )
+    queries: int = Field(
+        8192,
+        validation_alias=AliasChoices("q", "queries"),
+        description="number of hold-out queries to use when tuning",
+    )
 
     @model_validator(mode="after")
     def check_inputs_exist(self) -> Self:

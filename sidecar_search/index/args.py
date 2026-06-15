@@ -10,9 +10,14 @@ from sidecar_search.utils.cache_utils import seal_hf_cache, seal_persistent_cach
 
 class IndexMixin(CommonMixin, BaseModel, ABC):
     build_dir: NewPath | DirectoryPath = Field(
-        Path("."), validation_alias=AliasChoices("B", "build-dir")
+        Path("."),
+        validation_alias=AliasChoices("B", "build-dir"),
+        description="build directory for inputs/outputs",
     )
-    use_cache: bool = False  # for experiments only
+    use_cache: bool = Field(
+        False,
+        description="cache intermediate results. For index development only",
+    )
 
     @property
     def empty_index_path(self) -> Path:

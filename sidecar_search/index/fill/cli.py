@@ -4,7 +4,7 @@ from shutil import copy
 from typing import Self, override
 
 from datasets import Dataset
-from pydantic import BaseModel, DirectoryPath, model_validator
+from pydantic import BaseModel, DirectoryPath, Field, model_validator
 from pydantic_settings import CliPositionalArg
 
 from sidecar_search.utils.contextmanager_utils import del_on_exc
@@ -16,7 +16,15 @@ from ..utils.datasets_utils import BATCH_SIZE, load_dataset, resolve_dimensions
 
 
 class IndexFill(IndexMixin, BaseModel):
-    source: CliPositionalArg[DirectoryPath]
+    """Build a filled index from a trained base and a dataset.
+
+    Reads the trained base from the build directory and writes the filled index
+    to the build directory.
+    """
+
+    source: CliPositionalArg[DirectoryPath] = Field(
+        description="HuggingFace dataset to read from"
+    )
 
     @model_validator(mode="after")
     def check_inputs_exist(self) -> Self:

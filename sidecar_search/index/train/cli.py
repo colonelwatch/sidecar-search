@@ -30,15 +30,36 @@ GPU_OPQ_WIDTHS = [1, 2, 3, 4, 8, 12, 16, 20, 24, 28, 32, 48, 56, 64, 96]  # GPU 
 
 # TODO: make a mixin for source, distinct from clean command
 class IndexTrain(IndexMixin, BaseModel):
-    source: CliPositionalArg[DirectoryPath]
+    """Make a trained index base (inverted file type) from a dataset."""
+
+    source: CliPositionalArg[DirectoryPath] = Field(
+        description="HuggingFace dataset to train on."
+    )
     dimensions: int | None = Field(  # matryoshka
-        None, validation_alias=AliasChoices("d", "dimensions")
+        None,
+        validation_alias=AliasChoices("d", "dimensions"),
+        description=(
+            "dimensions to truncate to when using Matryoshka "
+            "embedding models, implies -N"
+        ),
     )
-    normalize: bool = Field(False, validation_alias=AliasChoices("N", "normalize"))
+    normalize: bool = Field(
+        False,
+        validation_alias=AliasChoices("N", "normalize"),
+        description="use normalized embeddings when training index",
+    )
     preprocess: str = Field(
-        "OPQ96_384", validation_alias=AliasChoices("p", "preprocess")
+        "OPQ96_384",
+        validation_alias=AliasChoices("p", "preprocess"),
+        description=(
+            "preprocessing to use when training index, uses FAISS index factory syntax"
+        ),
     )
-    clusters: int | None = Field(None, validation_alias=AliasChoices("c", "clusters"))
+    clusters: int | None = Field(
+        None,
+        validation_alias=AliasChoices("c", "clusters"),
+        description="Number of IVF clusters",
+    )
 
     _coerced_normalize: bool = PrivateAttr(False)
     _ivf_encoding: str = PrivateAttr()

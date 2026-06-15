@@ -21,14 +21,43 @@ from .dataset import dump_dataset
 
 
 class Dump(CommonMixin, BaseModel):
-    source: CliPositionalArg[DirectoryPath | FilePath]
-    dest: CliPositionalArg[NewPath]
-    batch_size: int = Field(1024, validation_alias=AliasChoices("b", "batch-size"))
-    shard_size: int = Field(  # under 4GB
-        4194304, validation_alias=AliasChoices("s", "shard-size")
+    """Dump ID-embedding pairs from SOURCE to DEST, converting formats.
+
+    The only supported input/output formats are HuggingFace (HF) datasets to
+    SQLite3 databases and SQLite3 databases to HF datasets. HF datasets to HF
+    datasets and SQLite3 databases to SQLite3 databases are not supported.
+    """
+
+    source: CliPositionalArg[DirectoryPath | FilePath] = Field(
+        description="HuggingFace dataset / SQLite3 database to read from"
     )
-    row_group_size: int = 262144
-    enforce_dtype: bool = True
+    dest: CliPositionalArg[NewPath] = Field(
+        description=(
+            "HuggingFace dataset / SQLite3 database to write to. "
+            "Must not be an existing folder/file"
+        )
+    )
+    batch_size: int = Field(
+        1024,
+        validation_alias=AliasChoices("b", "batch-size"),
+        description="read/write batch size",
+    )
+    shard_size: int = Field(  # under 4GB
+        4194304,
+        validation_alias=AliasChoices("s", "shard-size"),
+        description=(
+            "size of dataset shards, in number of vectors. "
+            "Only applies to writing datasets"
+        ),
+    )
+    row_group_size: int = Field(
+        262144,
+        description=(
+            "Parquet row group size, in number of vectors. "
+            "Only applies to writing datasets"
+        ),
+    )
+    no_enforce_dtype: bool = Field(False, description="disable enforcing data type")
 
     _to_dataset: bool = PrivateAttr()
 
@@ -41,6 +70,10 @@ class Dump(CommonMixin, BaseModel):
         else:
             raise ValueError("invalid source and destination types")
         return self
+
+    @property
+    def enforce_dtype(self) -> bool:
+        return not self.no_enforce_dtype
 
     def cli_cmd(self) -> None:
         source = self.source

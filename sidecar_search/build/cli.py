@@ -16,14 +16,45 @@ from .encode import PipelinedEncoder, get_model
 
 
 class Build(CommonMixin, BaseModel):
-    data_path: CliPositionalArg[FilePath]
-    tasks: int = Field(2, validation_alias=AliasChoices("t", "tasks"))
-    batch_size: int = Field(256, validation_alias=AliasChoices("b", "batch-size"))
-    filter_tasks: int = 5
-    filter_batch_size: int = 1024
+    """Encode ID-document pairs as ID-embedding pairs and store them.
+
+    Reads ID-document pairs as lines of `{"id": "...", "document": "..."}` JSON
+    objects over stdin, encode them, and store them in a SQLite3 database at
+    DEST, committing incrementally. Committed ID-embedding pairs are not lost
+    upon interruption of the process.
+
+    If an ID is already in the database, no encoding is performed for that
+    document, and the database will not be updated for that ID.
+    """
+
+    dest: CliPositionalArg[FilePath] = Field(
+        description=(
+            "the name of the SQLite database, must already exist "
+            "(initialized by `sidecar-search init`)"
+        )
+    )
+    tasks: int = Field(
+        2,
+        validation_alias=AliasChoices("t", "tasks"),
+        description="number of concurrent encode tasks per gpu",
+    )
+    batch_size: int = Field(
+        256,
+        validation_alias=AliasChoices("b", "batch-size"),
+        description=(
+            "size of encode batches, trades off memory usage "
+            "for reduced encode overhead/bottlenecking"
+        ),
+    )
+    filter_tasks: int = Field(
+        5, description="number of DB filter and number of DB insert tasks"
+    )
+    filter_batch_size: int = Field(
+        1024, description="size of filter and insert batches"
+    )
 
     def cli_cmd(self) -> None:
-        with SharedConnection(self.data_path) as conn:
+        with SharedConnection(self.dest) as conn:
             rows = (json.loads(line) for line in sys.stdin)
             rows = ((row["id"], row["document"]) for row in rows)
             batches = batched(rows, self.filter_batch_size)
