@@ -27,16 +27,26 @@ license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-	"torch~=2.6",
-	"sentence-transformers~=3.4",
-	"tqdm",
-	"numpy>=1.26.4",
-	"pyarrow>=19.0.0",
-	# Disabled due to faiss-gpu not being available on PyPI
-	# "faiss-gpu~=1.9.0",
-	"datasets>=3.3.2",
-	"pydantic",
-	"pydantic-settings",
+	"torch>=2.4",  # Python 3.12 support
+	"sentence-transformers>=3.1.1,<4",  # first numpy 2 ver; uses low-level API
+	"tqdm>=4",
+	"numpy>=2",
+	"pyarrow>=20.0.0,<21.0.0",  # last version with stubs
+	"faiss-gpu>=1.14.3",  # only these versions are official
+	"datasets>=3",
+	"pydantic>=2.11",  # PEP 695 support
+	"pydantic-settings>=2.11",  # follows pydantic
+]
+
+[dependency-groups]
+dev = [
+	"pyarrow-stubs==20.0.0.20251215",  # last maintained version
+	"pyrefly",
+	"pytest>=9.0",  # first version with TOML support
+	"pytest-benchmark>=5.2.3",  # first version with pytest 9 support
+	"coverage[toml]>=7",
+	"ruff",
+	"pre-commit>=4",
 ]
 
 [project.urls]
@@ -52,7 +62,6 @@ packages = ["sidecar_search"]
 exclude = ["**/tests", "**/conftest.py"]
 
 [tool.pytest]
-minversion = "9.0"  # pytest <9.0 _will not_ parse tool.pytest!
 norecursedirs = [  # removes "build" from norecursedirs defaults
 	"*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"
 ]
