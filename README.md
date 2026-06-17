@@ -26,8 +26,23 @@ sidecar-search --help
 
 ## Development
 
-The development suite is available as a dependency group, and it can be installed with this editable install command.
+The development branch of this project can be cloned with the following command.
 
 ```bash
+git clone -b dev https://github.com/colonelwatch/sidecar-search
+```
+
+This project uses Git LFS to have integration test files hosted. After making sure the `git lfs` command is available, Git LFS can be (locally) set up with the following commands.
+
+```bash
+git lfs install --local
+git lfs pull
+```
+
+The development suite is available as a dependency group, and it exposes a pre-commit config for ensuring early compliance with project standards. That can be set up with the following commands.
+
+```bash
+source .venv/bin/activate
 pip install --group dev -e .
+pre-commit install
 ```
