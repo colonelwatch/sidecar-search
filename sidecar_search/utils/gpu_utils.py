@@ -13,7 +13,7 @@ from threading import (
     _register_atexit,  # pyrefly: ignore[missing-module-attribute]
 )
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Concatenate, Self, overload
+from typing import TYPE_CHECKING, Any, Self
 
 import torch
 
@@ -57,61 +57,24 @@ def consume_futures[T](
         yield fut.result(yield_timeout)
 
 
-# NOTE: didn't use TypeVarTuple because it isn't contravariant
-@overload
-def imap[T, U_contra](
-    inputs: Iterator[tuple[U_contra]],
-    func: Callable[[U_contra], T],
-    n_tasks: int,
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]: ...
-
-
-@overload
-def imap[T, U_contra, V_contra](
-    inputs: Iterator[tuple[U_contra, V_contra]],
-    func: Callable[[U_contra, V_contra], T],
-    n_tasks: int,
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]: ...
-
-
-@overload
-def imap[T, U_contra, V_contra, W_contra](
-    inputs: Iterator[tuple[U_contra, V_contra, W_contra]],
-    func: Callable[[U_contra, V_contra, W_contra], T],
-    n_tasks: int,
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]: ...
-
-
 # TODO: refactor to a class?
-def imap[T](
-    inputs: Iterator[tuple],
-    func: Callable[..., T],
+def imap[*Ts, U](
+    inputs: Iterator[tuple[*Ts]],
+    func: Callable[[*Ts], U],
     n_tasks: int,  # TODO: rename to n_workers
     *,
     yield_timeout: float | None = None,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]:
+) -> Generator[U, None, None]:
     if n_tasks < 0:
         n_tasks = os.cpu_count() or 1
 
     with ThreadPoolExecutor(n_tasks or 1) as executor:
 
         def submit[**P](
-            func: Callable[P, T], *args: P.args, **kwargs: P.kwargs
-        ) -> Future[T]:
+            func: Callable[P, U], *args: P.args, **kwargs: P.kwargs
+        ) -> Future[U]:
             fut = executor.submit(func, *args, **kwargs)
             if on_done:
                 fut.add_done_callback(on_done)
@@ -126,54 +89,18 @@ def imap[T](
             raise
 
 
-# NOTE: didn't use TypeVarTuple because it isn't contravariant
-@overload
-def imap_multi_gpu[T, U_contra](
-    inputs: Iterator[tuple[U_contra]],
-    func: Callable[[torch.device, U_contra], T],
+def imap_multi_gpu[*Ts, U](
+    inputs: Iterator[tuple[*Ts]],
+    func: Callable[[torch.device, *Ts], U],
     tasks_per_gpu: int = 1,
     *,
     yield_timeout: float | None = None,
     on_done: Callable[[Future], Any] | None = None,
     on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]: ...
-
-
-@overload
-def imap_multi_gpu[T, U_contra, V_contra](
-    inputs: Iterator[tuple[U_contra, V_contra]],
-    func: Callable[[torch.device, U_contra, V_contra], T],
-    tasks_per_gpu: int = 1,
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]: ...
-
-
-@overload
-def imap_multi_gpu[T, U_contra, V_contra, W_contra](
-    inputs: Iterator[tuple[U_contra, V_contra, W_contra]],
-    func: Callable[[torch.device, U_contra, V_contra, W_contra], T],
-    tasks_per_gpu: int = 1,
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]: ...
-
-
-def imap_multi_gpu[T](
-    inputs: Iterator[tuple],
-    func: Callable[Concatenate[torch.device, ...], T],
-    tasks_per_gpu: int = 1,
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[T, None, None]:
-    def func_with_gpu(device: torch.device, data_in: tuple) -> T:
-        data_out = func(device, *data_in)
+) -> Generator[U, None, None]:
+    def func_with_gpu(device: torch.device, data_in: tuple[*Ts]) -> U:
+        # TODO: open Pyrefly issue regarding TypeVarTuple concatenation
+        data_out = func(device, *data_in)  # pyrefly: ignore[bad-argument-type]
         return data_out
 
     # TODO: think about how to extend this project to CPU-only
