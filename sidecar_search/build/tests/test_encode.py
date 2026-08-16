@@ -2,7 +2,7 @@ import json
 import lzma
 from itertools import batched, chain, cycle, repeat
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 from unittest.mock import ANY, MagicMock, create_autospec
 
 import numpy as np
@@ -20,8 +20,13 @@ from ..encode import DocumentEmbeddingBatch, PipelinedEncoder, encode_faster, ge
 EMBEDDING_KEY = "sentence_embedding"  # from SentenceTransformer `.encode`
 
 
-def get_encoder_model() -> SentenceTransformer:
-    return get_model("sentence-transformers/all-MiniLM-L6-v2", False, False)
+@pytest.fixture
+def encoder_model_factory() -> Callable[[], SentenceTransformer]:
+    def model_factory() -> SentenceTransformer:
+        return get_model("sentence-transformers/all-MiniLM-L6-v2", False, False)
+
+    _ = model_factory()  # warm-up cache (TODO: can the model be cloned?)
+    return model_factory
 
 
 @pytest.fixture(scope="session")
@@ -106,14 +111,16 @@ def test_encode_faster() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(30, func_only=True)
 def test_encode_faster_integration(
+    encoder_model_factory: Callable[[], SentenceTransformer],
     golden_sample: tuple[list[str], npt.NDArray[np.float16]],
 ) -> None:
     n_items = 16
     documents, expect_embeddings = golden_sample
     documents = documents[:n_items]
     expect_embeddings = expect_embeddings[:n_items]
-    model = get_encoder_model()
+    model = encoder_model_factory()
     embeddings = encode_faster(model, documents)
     assert_embeddings_close(embeddings, expect_embeddings)
 
@@ -177,15 +184,17 @@ class TestPipelinedEncoder:
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(30, func_only=True)
 class TestPipelinedEncoderIntegration:
     def test_bulk_encode(
         self,
-        benchmark: BenchmarkFixture,
+        encoder_model_factory: Callable[[], SentenceTransformer],
         golden_sample: tuple[list[str], npt.NDArray[np.float16]],
+        benchmark: BenchmarkFixture,
     ) -> None:
         documents, expect_embeddings = golden_sample
 
-        encoder = PipelinedEncoder(get_encoder_model)
+        encoder = PipelinedEncoder(encoder_model_factory)
 
         def process() -> list[DocumentEmbeddingBatch]:
             batches_iter = batched(zip(repeat("foo"), iter(documents)), 128)
