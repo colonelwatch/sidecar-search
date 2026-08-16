@@ -144,7 +144,7 @@ class TestScheduler:
 
     @pytest.mark.parametrize("action", [iter, next])
     def test_raises_after_shutdown(
-        self, action: Callable[[Scheduler[Any, Any]], Any]
+        self, action: Callable[[Scheduler[Any]], Any]
     ) -> None:
         scheduler = Scheduler.new(lambda x: x, zip(range(10)), 1)
         scheduler.shutdown()
@@ -211,8 +211,8 @@ class TestIstarmap:
     )
     def test_raises_on_access_after_close(
         self,
-        close_action: Callable[[istarmap[*tuple[Any, ...], Any]], Any],
-        action: Callable[[istarmap[*tuple[Any, ...], Any]], Any],
+        close_action: Callable[[istarmap[Any]], Any],
+        action: Callable[[istarmap[Any]], Any],
     ) -> None:
         items_recv_iter = istarmap(lambda x: x, zip(range(10)), n_workers=4)
         close_action(items_recv_iter)

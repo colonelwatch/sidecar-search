@@ -88,19 +88,19 @@ class PipelineExitStack(ExitStack[None]):
         return super().__exit__(exc_type, exc, exc_tb)
 
 
-class Scheduler[*Ts, U](Iterator[Future[U]]):
+class Scheduler[R](Iterator[Future[R]]):
     @classmethod
-    def new[*Vs, W](
+    def new[*Ts, U](
         cls,
-        func: Callable[[*Vs], W],
-        args_in: Iterator[tuple[*Vs]],
+        func: Callable[[*Ts], U],
+        args_in: Iterator[tuple[*Ts]],
         n_workers: int,
-    ) -> "Scheduler[*Vs, W]":
+    ) -> "Scheduler[U]":
         return cls(func, args_in, ThreadPoolExecutor(n_workers))
 
-    def __init__(
+    def __init__[*Ts](
         self,
-        func: Callable[[*Ts], U],
+        func: Callable[[*Ts], R],
         args_in: Iterator[tuple[*Ts]],
         executor: Executor,  # ownership moves to this instance
     ) -> None:
@@ -114,7 +114,7 @@ class Scheduler[*Ts, U](Iterator[Future[U]]):
         _ = self._get_futs_validate()
         return self
 
-    def __next__(self) -> Future[U]:
+    def __next__(self) -> Future[R]:
         return next(self._get_futs_validate())
 
     def shutdown(self) -> None:
@@ -122,24 +122,24 @@ class Scheduler[*Ts, U](Iterator[Future[U]]):
         self._executor.shutdown()
         self._shutdown = True
 
-    def _get_futs_validate(self) -> Iterator[Future[U]]:
+    def _get_futs_validate(self) -> Iterator[Future[R]]:
         if self._shutdown:
             raise RuntimeError("scheduled with a shut down scheduler")
         return self._futs
 
 
-class istarmap[*Ts, U](Iterator[U]):
-    def __init__(
+class istarmap[R](Iterator[R]):
+    def __init__[*Ts](
         self,
-        func: Callable[[*Ts], U],
-        args_in: Iterator[tuple[*Ts]],
+        func: Callable[[*Ts], R],
+        iterable: Iterator[tuple[*Ts]],
         /,
         *,
         n_workers: int = -1,
     ) -> None:
         if n_workers < 0:
             n_workers = os.cpu_count() or 1
-        scheduler = Scheduler.new(func, args_in, n_workers or 1)
+        scheduler = Scheduler.new(func, iterable, n_workers or 1)
         results_iter = consume_futures(scheduler, n_workers)
         self._scheduler = scheduler
         self._results_iter = results_iter
@@ -164,14 +164,14 @@ class istarmap[*Ts, U](Iterator[U]):
         _ = self._get_results_iter_validate()
         return self
 
-    def __next__(self) -> U:
+    def __next__(self) -> R:
         return next(self._get_results_iter_validate())
 
     def close(self) -> None:
         self._scheduler.shutdown()
         self._closed = True
 
-    def _get_results_iter_validate(self) -> Iterator[U]:
+    def _get_results_iter_validate(self) -> Iterator[R]:
         if self._closed:
             raise RuntimeError("accessed a shut down istarmap")
         return self._results_iter
