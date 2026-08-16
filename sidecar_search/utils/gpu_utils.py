@@ -2,8 +2,9 @@ import os
 import weakref
 from collections import deque
 from collections.abc import Callable, Generator, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar, Token
 from enum import Enum, auto
 from itertools import cycle
 from threading import (
@@ -40,6 +41,11 @@ def _run_finalizers() -> None:
 _register_atexit(_run_finalizers)
 
 
+_current_exit_stack: ContextVar["PipelineExitStack | None"] = ContextVar(
+    "_current_exit_stack", default=None
+)
+
+
 def consume_futures[T](
     futs: Iterator[Future[T]], max_pending: int, yield_timeout: float | None = None
 ) -> Generator[T, None, None]:
@@ -57,46 +63,123 @@ def consume_futures[T](
         yield fut.result(yield_timeout)
 
 
-# TODO: refactor to a class?
-def imap[*Ts, U](
-    inputs: Iterator[tuple[*Ts]],
-    func: Callable[[*Ts], U],
-    n_tasks: int,  # TODO: rename to n_workers
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
-) -> Generator[U, None, None]:
-    if n_tasks < 0:
-        n_tasks = os.cpu_count() or 1
+class PipelineExitStack(ExitStack[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self._token: Token[PipelineExitStack | None] | None = None
 
-    with ThreadPoolExecutor(n_tasks or 1) as executor:
+    def __enter__(self) -> Self:
+        if self._token is not None:
+            raise RuntimeError("PipelineExitStack is not recursive")
+        ret = super().__enter__()
+        self._token = _current_exit_stack.set(self)
+        return ret
 
-        def submit[**P](
-            func: Callable[P, U], *args: P.args, **kwargs: P.kwargs
-        ) -> Future[U]:
-            fut = executor.submit(func, *args, **kwargs)
-            if on_done:
-                fut.add_done_callback(on_done)
-            return fut
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        if self._token is None:
+            # NOTE: if __enter__ sets `self._token` this should be impossible
+            raise RuntimeError("missing token for thread-local reset")
+        _current_exit_stack.reset(self._token)
+        return super().__exit__(exc_type, exc, exc_tb)
 
-        try:
-            futs = (submit(func, *data_in) for data_in in inputs)
-            yield from consume_futures(futs, n_tasks, yield_timeout=yield_timeout)
-        except (Exception, BaseException) as e:
-            if on_break:
-                on_break(e)
-            raise
+
+class Scheduler[*Ts, U](Iterator[Future[U]]):
+    @classmethod
+    def new[*Vs, W](
+        cls,
+        func: Callable[[*Vs], W],
+        args_in: Iterator[tuple[*Vs]],
+        n_workers: int,
+    ) -> "Scheduler[*Vs, W]":
+        return cls(func, args_in, ThreadPoolExecutor(n_workers))
+
+    def __init__(
+        self,
+        func: Callable[[*Ts], U],
+        args_in: Iterator[tuple[*Ts]],
+        executor: Executor,  # ownership moves to this instance
+    ) -> None:
+        futs = (executor.submit(func, *args) for args in args_in)
+        weakref.finalize(futs, executor.shutdown, wait=False)
+        self._futs = futs
+        self._executor = executor
+        self._shutdown = False
+
+    def __iter__(self) -> Self:
+        _ = self._get_futs_validate()
+        return self
+
+    def __next__(self) -> Future[U]:
+        return next(self._get_futs_validate())
+
+    def shutdown(self) -> None:
+        # NOTE: don't abandon pending futures, args were consumed already
+        self._executor.shutdown()
+        self._shutdown = True
+
+    def _get_futs_validate(self) -> Iterator[Future[U]]:
+        if self._shutdown:
+            raise RuntimeError("scheduled with a shut down scheduler")
+        return self._futs
+
+
+# TODO: starmap is function-first
+class imap[*Ts, U](Iterator[U]):
+    def __init__(
+        self,
+        args_in: Iterator[tuple[*Ts]],
+        func: Callable[[*Ts], U],
+        n_workers: int,
+    ) -> None:
+        if n_workers < 0:
+            n_workers = os.cpu_count() or 1
+        scheduler = Scheduler.new(func, args_in, n_workers or 1)
+        results_iter = consume_futures(scheduler, n_workers)
+        self._scheduler = scheduler
+        self._results_iter = results_iter
+        self._closed = False
+
+        exit_stack = _current_exit_stack.get()
+        if exit_stack is not None:
+            exit_stack.callback(self.close)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def __iter__(self) -> Self:
+        _ = self._get_results_iter_validate()
+        return self
+
+    def __next__(self) -> U:
+        return next(self._get_results_iter_validate())
+
+    def close(self) -> None:
+        self._scheduler.shutdown()
+        self._closed = True
+
+    def _get_results_iter_validate(self) -> Iterator[U]:
+        if self._closed:
+            raise RuntimeError("accessed a shut down imap")
+        return self._results_iter
 
 
 def imap_multi_gpu[*Ts, U](
     inputs: Iterator[tuple[*Ts]],
     func: Callable[[torch.device, *Ts], U],
     tasks_per_gpu: int = 1,
-    *,
-    yield_timeout: float | None = None,
-    on_done: Callable[[Future], Any] | None = None,
-    on_break: Callable[[Exception | BaseException], Any] | None = None,
 ) -> Generator[U, None, None]:
     def func_with_gpu(device: torch.device, data_in: tuple[*Ts]) -> U:
         # TODO: open Pyrefly issue regarding TypeVarTuple concatenation
@@ -110,14 +193,7 @@ def imap_multi_gpu[*Ts, U](
 
     n_tasks = n_gpus * tasks_per_gpu
     devices = cycle(torch.device(f"cuda:{i}") for i in range(n_gpus))
-    yield from imap(
-        zip(devices, inputs),
-        func_with_gpu,
-        n_tasks,
-        yield_timeout=yield_timeout,
-        on_done=on_done,
-        on_break=on_break,
-    )
+    yield from imap(zip(devices, inputs), func_with_gpu, n_tasks)
 
 
 class _StreamState(Enum):
@@ -229,9 +305,13 @@ class iqueue[T](Iterator[T]):
         self._finalized = False
         self._thread = Thread(target=self._routine, args=(stream, items))
 
-        # to support cancellation when used not as a context manager, register
-        # a finalizer, but shift up on-exit call to _before_ non-daemonic
-        # threads are joined (like is done in ThreadPoolExecutor)
+        exit_stack = _current_exit_stack.get()
+        if exit_stack is not None:
+            exit_stack.callback(self.close)
+
+        # to support cancellation when without a context manager, register a
+        # finalizer, but shift up on-exit call to _before_ non-daemonic threads
+        # are joined (like is done in ThreadPoolExecutor)
         # TODO: open issue on Pyrefly about how finalize stub needs to include
         #       property setter for `atexit` (bypassing the `__slots__` issue),
         #       then remove the error-ignore
@@ -241,7 +321,6 @@ class iqueue[T](Iterator[T]):
             _finalizers[self] = finalizer
 
     def __enter__(self) -> Self:
-        self._start_thread_if_not_started()
         return self
 
     def __exit__(
@@ -250,12 +329,7 @@ class iqueue[T](Iterator[T]):
         exc: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        # cancel stream manually, and to have a gc-like lifetime, bar future use
-        # of this object by setting (and checking) self._finalized
-        assert self._started, "__enter__ did not start thread"
-        self._stream.cancel(block=True)
-        self._thread.join()
-        self._finalized = True
+        self.close()
 
     def __iter__(self) -> Self:
         self._start_thread_if_not_started()
@@ -267,6 +341,12 @@ class iqueue[T](Iterator[T]):
         if item is StreamSentinel.token:
             raise StopIteration
         return item
+
+    def close(self) -> None:
+        self._stream.cancel(block=self._started)
+        if self._started:
+            self._thread.join()
+        self._finalized = True
 
     def _start_thread_if_not_started(self) -> None:
         if self._finalized:

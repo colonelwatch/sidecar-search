@@ -1,24 +1,27 @@
 import gc
+import os
 from collections import deque
+from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
-from itertools import count, cycle
+from contextlib import AbstractContextManager
+from itertools import cycle
 from threading import Condition, Event
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    Iterator,
-    Never,
-    TypedDict,
-    cast,
+from typing import Any, Never, Protocol, cast
+from unittest.mock import (
+    MagicMock,
+    NonCallableMagicMock,
+    call,
+    create_autospec,
+    sentinel,
 )
-from unittest.mock import ANY, MagicMock, NonCallableMagicMock, call, create_autospec
 
 import pytest
 import torch
 
 from .. import gpu_utils
 from ..gpu_utils import (
+    PipelineExitStack,
+    Scheduler,
     Stream,
     StreamSentinel,
     StreamSlot,
@@ -28,6 +31,21 @@ from ..gpu_utils import (
     iqueue,
 )
 from .capturing_condition import CapturingCondition
+
+_N_CPUS = os.cpu_count() or 1
+
+
+class _SupportsClose(Protocol):
+    def close(self) -> None: ...
+
+
+def _step_close(resource: _SupportsClose) -> None:
+    resource.close()
+
+
+def _step_context_manager(ctx: AbstractContextManager[Any]) -> None:
+    with ctx:
+        pass
 
 
 class TestConsumeFutures:
@@ -89,88 +107,131 @@ class TestConsumeFutures:
         assert list(consume_futures(futs, 0)) == []
 
 
-class TestImapParallel:
-    def test_map(self) -> None:
-        def double(x: int) -> int:
-            return x * 2
+class TestScheduler:
+    def test_coupled_consumption(self) -> None:
+        vals_iter = iter(range(10))
+        scheduler = Scheduler.new(lambda x: x, zip(vals_iter), 2)
+        _ = next(scheduler)
+        actual = next(vals_iter)
+        assert actual == 1  # pre-consumption poses in-flight risk
+
+    def test_submit(self) -> None:
+        def identity(x: Any) -> Any:
+            return x
 
         vals = range(10)
-        results_iter = imap(zip(vals), double, 2)
-        assert list(map(double, vals)) == list(results_iter)
+        mock_executor: NonCallableMagicMock = create_autospec(
+            ThreadPoolExecutor, instance=True
+        )
+        scheduler = Scheduler(identity, zip(vals), mock_executor)
+        _ = list(scheduler)
 
-    def test_order(self) -> None:
-        event = Event()
+        assert mock_executor.submit.call_args_list == [call(identity, x) for x in vals]
 
-        def on_done(fut: Future) -> None:
-            if fut.result() == 1:
-                event.set()
-
-        def func(i: int) -> int:
-            if i == 0:
-                event.wait()
-            return i
-
-        vals = range(2)
-        assert list(imap(zip(vals), func, 2, on_done=on_done)) == [0, 1]
-
-
-@pytest.mark.parametrize("n_tasks", [0, 1])
-class TestImapConcurrent:
-    def test_blocking(self, n_tasks: int) -> None:
-        evt = Event()
-
-        with pytest.raises(TimeoutError):
-            vals = range(10)
-            results_iter = imap(
-                zip(vals),
-                lambda _: evt.wait(),
-                n_tasks,
-                yield_timeout=0,
-                on_break=(lambda _: evt.set()),
-            )
-            _ = list(results_iter)
-
-    def test_backpressure(self, n_tasks: int) -> None:
-        evt = Event()
-
-        vals_iter = count()
-        try:
-            results_iter = imap(
-                zip(vals_iter),
-                lambda _: evt.wait(),
-                n_tasks,
-                yield_timeout=0,
-                on_break=(lambda _: evt.set()),
-            )
-            _ = list(results_iter)
-        except TimeoutError:
-            pass
-
-        assert next(vals_iter) == n_tasks + 1
-
-    def test_on_break(self, n_tasks: int) -> None:
-        exc = Exception()
-        passed: Exception | BaseException | None = None
-        raised: Exception | BaseException | None = None
-
-        def raise_exc(_) -> None:
-            raise exc
-
-        def on_break(e: Exception | BaseException) -> None:
-            nonlocal passed
-            passed = e
-
-        vals = range(10)
-        try:
-            _ = list(imap(zip(vals), raise_exc, n_tasks, on_break=on_break))
-        except Exception as e:
-            raised = e
-
-        assert exc is passed and exc is raised
-
-    def test_empty_iterator(self, n_tasks: int) -> None:
+    def test_empty_iterator(self) -> None:
         vals = iter(tuple())
-        assert list(imap(zip(vals), lambda x: x, n_tasks)) == []
+        scheduler = Scheduler.new(lambda x: x, zip(vals), 1)
+        actual = list(consume_futures(scheduler, 1))
+        assert actual == []
+
+    def test_shutdown_delegates_to_executor(self) -> None:
+        mock_executor: NonCallableMagicMock = create_autospec(
+            ThreadPoolExecutor, instance=True
+        )
+        scheduler = Scheduler(lambda x: x, zip(range(10)), mock_executor)
+        scheduler.shutdown()
+        mock_executor.shutdown.assert_called_once_with()
+
+    @pytest.mark.parametrize("action", [iter, next])
+    def test_raises_after_shutdown(
+        self, action: Callable[[Scheduler[Any, Any]], Any]
+    ) -> None:
+        scheduler = Scheduler.new(lambda x: x, zip(range(10)), 1)
+        scheduler.shutdown()
+        with pytest.raises(RuntimeError, match="shut down"):
+            _ = action(scheduler)
+
+    def test_shutdown_on_gc(self) -> None:
+        mock_executor: NonCallableMagicMock = create_autospec(
+            ThreadPoolExecutor, instance=True
+        )
+        scheduler = Scheduler(lambda x: x, zip(range(10)), mock_executor)
+        del scheduler
+        gc.collect()
+        mock_executor.shutdown.assert_called_once_with(wait=False)
+
+
+class TestImap:
+    @pytest.mark.parametrize(
+        ("n_workers", "expected_n_workers", "expected_n_pending"),
+        [
+            pytest.param(-1, _N_CPUS, _N_CPUS, id="all_cores"),
+            pytest.param(0, 1, 0, id="synchronous"),
+            pytest.param(1, 1, 1, id="deferred"),
+            pytest.param(2, 2, 2, id="multicore"),
+        ],
+    )
+    def test_imap(
+        self,
+        n_workers: int,
+        expected_n_workers: int,
+        expected_n_pending: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        patch_scheduler_new: MagicMock = create_autospec(Scheduler.new)
+        patch_scheduler_new.return_value = sentinel.scheduler
+        monkeypatch.setattr(Scheduler, "new", patch_scheduler_new)
+
+        patch_consume_futures: MagicMock = create_autospec(consume_futures)
+        patch_consume_futures.return_value = iter(range(10))
+        monkeypatch.setattr(gpu_utils, "consume_futures", patch_consume_futures)
+
+        def identity(x: Any) -> Any:
+            return x
+
+        actual = list(imap(sentinel.args_in, identity, n_workers))
+
+        # transitively prove properties by proving forwarding
+        patch_scheduler_new.assert_called_once_with(
+            identity, sentinel.args_in, expected_n_workers
+        )
+        patch_consume_futures.assert_called_once_with(
+            sentinel.scheduler, expected_n_pending
+        )
+
+        assert actual == list(range(10))
+
+    @pytest.mark.parametrize(
+        ("close_action", "action"),
+        [
+            (_step_close, iter),
+            (_step_close, next),
+            (_step_context_manager, next),
+        ],
+    )
+    def test_raises_on_access_after_close(
+        self,
+        close_action: Callable[[imap[*tuple[Any, ...], Any]], Any],
+        action: Callable[[imap[*tuple[Any, ...], Any]], Any],
+    ) -> None:
+        items_recv_iter = imap(zip(range(10)), lambda x: x, 4)
+        close_action(items_recv_iter)
+        with pytest.raises(RuntimeError, match="shut down"):
+            _ = action(items_recv_iter)
+
+    def test_exit_stack(self) -> None:
+        exit_stack = PipelineExitStack()
+        with exit_stack:
+            im = imap(zip(range(10)), lambda x: x, 1)
+        with pytest.raises(RuntimeError, match="shut down"):
+            _ = next(im)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("n_workers", [-1, 0, 1, 2])
+def test_imap_integration(n_workers: int) -> None:
+    actual = list(imap(zip(range(10)), lambda x: 2 * x, n_workers))
+    assert actual == list(range(0, 20, 2))
 
 
 @pytest.fixture
@@ -179,13 +240,6 @@ def mock_imap(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     mock_imap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
     monkeypatch.setattr(gpu_utils, "imap", mock_imap)
     return mock_imap
-
-
-# NOTE: these are kw-only arguments, which don't require manual resolution
-class ExpectedImapKwargs(TypedDict):
-    yield_timeout: float | None
-    on_done: Callable[[Future], Any] | None
-    on_break: Callable[[Exception | BaseException], Any] | None
 
 
 @pytest.mark.usefixtures("mock_gpu_env")
@@ -214,16 +268,6 @@ class TestImapMultiGpu:
             n_tasks = mock_imap.call_args.args[2]
 
         assert n_tasks_per_gpu * torch.cuda.device_count() == n_tasks
-
-    def test_kwargs_passed(self, mock_imap: MagicMock) -> None:
-        vals = range(10)
-        my_kwargs = ExpectedImapKwargs(
-            yield_timeout=10,
-            on_done=(lambda _: None),
-            on_break=(lambda _: None),
-        )
-        _ = list(imap_multi_gpu(zip(vals), lambda _, x: x, **my_kwargs))
-        mock_imap.assert_called_once_with(ANY, ANY, ANY, **my_kwargs)
 
 
 @pytest.fixture
@@ -525,31 +569,31 @@ class TestIqueue:
         items_recv = list(iqueue(iter(items)))
         assert items_recv == items
 
-    def test_context_manager(self, items: list[int]) -> None:
+    @pytest.mark.parametrize(
+        ("close_action", "action"),
+        [
+            (_step_close, iter),
+            (_step_close, next),
+            (_step_context_manager, next),
+        ],
+    )
+    def test_raises_on_access_after_close(
+        self,
+        close_action: Callable[[iqueue[Any]], Any],
+        action: Callable[[iqueue[Any]], Any],
+        items: list[int],
+    ) -> None:
         items_iter = iter(items)
-        with iqueue(items_iter) as items_recv_iter:
-            items_recv = list(items_recv_iter)
-        assert items_recv == items
+        items_recv_iter = iqueue(items_iter)
+        close_action(items_recv_iter)
+        with pytest.raises(RuntimeError, match="shut down"):
+            _ = action(items_recv_iter)
 
-    @pytest.mark.parametrize("n_items", [0, 1, 2])
-    def test_context_manager_break_early(self, n_items: int) -> None:
-        items_iter = iter(range(n_items + 2))
-        items_recv: list[int] = []
-
-        with iqueue(items_iter) as items_recv_iter:
-            for i, item_recv in enumerate(items_recv_iter):
-                if i == n_items:
-                    break
-                items_recv.append(item_recv)
-            next_item_recv = next(items_recv_iter)
-
-        assert items_recv == list(range(n_items))
-        assert next_item_recv == n_items + 1
-
-    def test_context_manager_raises_on_second_use(self, items: list[int]) -> None:
+    def test_exit_stack(self, items: list[int]) -> None:
         items_iter = iter(items)
-        with iqueue(items_iter) as items_recv_iter:
-            pass
+        exit_stack = PipelineExitStack()
+        with exit_stack:
+            items_recv_iter = iqueue(items_iter)
         with pytest.raises(RuntimeError, match="shut down"):
             _ = next(items_recv_iter)
 
@@ -578,12 +622,11 @@ class TestIqueue:
             producer_failed_to_block.set()
             consumer_wakeup.set()
 
+        items_recv_iter = iqueue(iter([1, 2]), maxsize=1)
         cv.call_on_next_block(on_blocked_producer, lambda: list(q) == [1])
-        with (
-            ThreadPoolExecutor(1) as waiter,
-            iqueue(iter([1, 2]), maxsize=1) as items_recv_iter,
-        ):
-            fut = waiter.submit(wait_for_failure_to_block)
+        with ThreadPoolExecutor(2) as waiters:
+            get_fut = waiters.submit(next, items_recv_iter)  # kick off iqueue
+            block_fut = waiters.submit(wait_for_failure_to_block)
             try:
                 consumer_wakeup.wait()
                 if producer_failed_to_block.is_set():
@@ -592,11 +635,21 @@ class TestIqueue:
                 with cv:
                     done.set()
                     cv.notify_all()
-                fut.result()
+                block_fut.result()
 
             # unblock producer
-            _ = next(items_recv_iter)
+            _ = get_fut.result()
             producer_wakeup.set()
             _ = next(items_recv_iter)
             with pytest.raises(StopIteration):
                 _ = next(items_recv_iter)
+
+
+def test_pipeline_exit_stack_nested() -> None:
+    items = range(10)
+    with PipelineExitStack():
+        iq = iqueue(iter(items))
+        with PipelineExitStack():  # this exiting shouldn't break iq
+            pass
+        actual = list(iq)
+    assert actual == list(items)
