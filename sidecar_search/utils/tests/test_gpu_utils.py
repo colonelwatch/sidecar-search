@@ -1,5 +1,6 @@
 import gc
 import os
+import re
 from collections import deque
 from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -26,6 +27,7 @@ from ..gpu_utils import (
     StreamSentinel,
     StreamSlot,
     consume_futures,
+    imap,
     imap_multi_gpu,
     iqueue,
     istarmap,
@@ -244,6 +246,48 @@ def mock_istarmap(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return mock_istarmap
 
 
+class TestImap:
+    @pytest.mark.parametrize(
+        ("primes", "func", "expected"),
+        [
+            (((2, 3),), lambda x: x, [2, 3]),
+            (((2, 3), (5, 7)), lambda x, y: x * y, [10, 21]),
+            (((2, 3), (5, 7), (11, 13)), lambda x, y, z: x * y * z, [110, 273]),
+        ],
+    )
+    def test_zip(
+        self,
+        primes: tuple[tuple[int, ...], ...],
+        func: Callable[[*tuple[int, ...]], int],
+        expected: list[int],
+    ) -> None:
+        actual = list(imap(func, *(iter(x) for x in primes), strict=True))
+        assert actual == expected
+
+    def test_not_strict(self) -> None:
+        vals_iter_0 = iter((2, 3, 5))
+        vals_iter_1 = iter((7, 11))
+        actual = list(imap(lambda x, y: x * y, vals_iter_0, vals_iter_1, strict=False))
+        assert actual == [14, 33]
+
+    def test_strict(self) -> None:
+        vals_iter_0 = iter((2, 3, 5))
+        vals_iter_1 = iter((7, 11))
+        with pytest.raises(
+            ValueError,
+            match=re.escape("zip() argument 2 is shorter than argument 1"),
+        ):
+            _ = list(imap(lambda x, y: x * y, vals_iter_0, vals_iter_1, strict=True))
+
+    def test_n_workers_arg_passed(self, mock_istarmap: MagicMock) -> None:
+        vals = range(10)
+        n_workers = 7
+        _ = list(imap((lambda x: x), iter(vals), n_workers=n_workers))
+        mock_istarmap.assert_called_once()
+        actual_n_workers = mock_istarmap.call_args.kwargs.get("n_workers", None)
+        assert n_workers == actual_n_workers
+
+
 @pytest.mark.usefixtures("mock_gpu_env")
 class TestImapMultiGpu:
     def test_args_concatenate(self) -> None:
@@ -253,14 +297,16 @@ class TestImapMultiGpu:
         def combine(device: torch.device, value: int) -> tuple[int, int]:
             return (device.index, value)
 
-        results = list(imap_multi_gpu(zip(vals), combine))
+        results = list(imap_multi_gpu(combine, iter(vals)))
         expecteds = list(zip(idxs, vals))
         assert results == expecteds
 
     def test_tasks_arg_passed(self, mock_istarmap: MagicMock) -> None:
         vals = range(10)
         n_tasks_per_gpu = 2
-        _ = list(imap_multi_gpu(zip(vals), (lambda _, x: x), n_tasks_per_gpu))
+        _ = list(
+            imap_multi_gpu((lambda _, x: x), iter(vals), tasks_per_gpu=n_tasks_per_gpu)
+        )
         mock_istarmap.assert_called_once()
         n_tasks = mock_istarmap.call_args.kwargs["n_workers"]
         assert n_tasks_per_gpu * torch.cuda.device_count() == n_tasks

@@ -5,7 +5,7 @@ from typing import Generator, Iterator, Self
 
 from tqdm import tqdm
 
-from sidecar_search.utils.gpu_utils import consume_futures, istarmap
+from sidecar_search.utils.gpu_utils import consume_futures, imap
 from sidecar_search.utils.table_utils import insert_embeddings
 
 from .encode import DocumentEmbeddingBatch, DocumentIdBatch
@@ -81,7 +81,7 @@ class ParallelFilter:
         if progress:
             self._counter = tqdm()
 
-        yield from istarmap(self._filt, zip(batches), n_workers=n_tasks)
+        yield from imap(self._filt, batches, n_workers=n_tasks)
 
         if self._counter is not None:
             self._counter.close()

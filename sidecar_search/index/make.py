@@ -74,7 +74,7 @@ class MakeIndexBuilder:
                     batches = iter_tensors(shard)
                     batches = istarmap(self._preproc, batches)
                     batches = iqueue(batches)
-                    counts = imap_multi_gpu(batches, self._add_with_gpu)
+                    counts = imap_multi_gpu(self._add_with_gpu, batches)
                     for count in counts:
                         c.update(count)
 
@@ -121,8 +121,9 @@ class MakeIndexBuilder:
         return ids, embeddings
 
     def _add_with_gpu(
-        self, device: torch.device, ids: torch.Tensor, embeddings: torch.Tensor
+        self, device: torch.device, ids_embeddings: tuple[torch.Tensor, torch.Tensor]
     ) -> int:
+        ids, embeddings = ids_embeddings
         on_gpu = self._on_gpus[device.index]
         on_gpu.add_with_ids(  # type: ignore # faiss class_wrappers.py
             embeddings.numpy(), ids.numpy()

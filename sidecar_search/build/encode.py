@@ -54,7 +54,7 @@ class PipelinedEncoder:
         self, batches: Iterator[DocumentIdBatch]
     ) -> Generator[DocumentEmbeddingBatch, None, None]:
         yield from imap_multi_gpu(
-            zip(batches), self._encode_batch, tasks_per_gpu=self._tasks_per_gpu
+            self._encode_batch, batches, tasks_per_gpu=self._tasks_per_gpu
         )
 
     def _encode_batch(

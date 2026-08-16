@@ -76,7 +76,7 @@ class GroundTruthBuilder:
 
             batches = iter_tensors(self._dataset)
             batches = update_counter(batches)  # w/o CUDA sync, is always approximate
-            batches = imap_multi_gpu(batches, self._local_topk)
+            batches = imap_multi_gpu(self._local_topk, batches)
             batches = iqueue(batches)
             gt_ids, _ = reduce(self._reduce_topk, batches, (gt_ids, gt_scores))
 
@@ -92,8 +92,10 @@ class GroundTruthBuilder:
 
     # NOTE: ground truth is computed with the full embedding length
     def _local_topk(
-        self, device: torch.device, ids: torch.Tensor, embeddings: torch.Tensor
+        self, device: torch.device, ids_embeddings: tuple[torch.Tensor, torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        ids, embeddings = ids_embeddings
+
         # send to GPU asynchronously
         embeddings = embeddings.to(device, non_blocking=True)
         ids = ids.to(device, non_blocking=True)

@@ -14,7 +14,7 @@ from threading import (
     _register_atexit,  # pyrefly: ignore[missing-module-attribute]
 )
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Self, overload
 
 import torch
 
@@ -177,24 +177,78 @@ class istarmap[R](Iterator[R]):
         return self._results_iter
 
 
-def imap_multi_gpu[*Ts, U](
-    inputs: Iterator[tuple[*Ts]],
-    func: Callable[[torch.device, *Ts], U],
-    tasks_per_gpu: int = 1,
-) -> Generator[U, None, None]:
-    def func_with_gpu(device: torch.device, data_in: tuple[*Ts]) -> U:
-        # TODO: open Pyrefly issue regarding TypeVarTuple concatenation
-        data_out = func(device, *data_in)  # pyrefly: ignore[bad-argument-type]
-        return data_out
+@overload
+def imap[T, U](
+    func: Callable[[T], U],
+    iterable: Iterator[T],
+    /,
+    *,
+    n_workers: int = ...,
+    strict: bool = ...,
+) -> istarmap[U]: ...
 
+
+@overload
+def imap[T, U, V](
+    func: Callable[[T, U], V],
+    iterable: Iterator[T],
+    iter2: Iterator[U],
+    /,
+    *,
+    n_workers: int = ...,
+    strict: bool = ...,
+) -> istarmap[V]: ...
+
+
+@overload
+def imap[T, U, V, W](
+    func: Callable[[T, U, V], W],
+    iterable: Iterator[T],
+    iter2: Iterator[U],
+    iter3: Iterator[V],
+    /,
+    *,
+    n_workers: int = ...,
+    strict: bool = ...,
+) -> istarmap[W]: ...
+
+
+@overload
+def imap[R](
+    func: Callable[..., R],
+    iterable: Iterator[Any],
+    /,
+    *iters: Iterator[Any],
+    n_workers: int = ...,
+    strict: bool = ...,
+) -> istarmap[R]: ...
+
+
+def imap[R](
+    func: Callable[..., R],
+    iterable: Iterator[Any],  # at least one
+    /,
+    *iters: Iterator[Any],
+    n_workers: int = -1,
+    strict: bool = False,
+) -> istarmap[R]:
+    return istarmap(func, zip(iterable, *iters, strict=strict), n_workers=n_workers)
+
+
+def imap_multi_gpu[T, U](
+    func: Callable[[torch.device, T], U],
+    iterable: Iterator[T],
+    /,
+    *,
+    tasks_per_gpu: int = 1,
+) -> istarmap[U]:
     # TODO: think about how to extend this project to CPU-only
     n_gpus = torch.cuda.device_count()
     if n_gpus == 0:
         raise NotImplementedError("CPU-only is currently not handled")
-
     n_tasks = n_gpus * tasks_per_gpu
     devices = cycle(torch.device(f"cuda:{i}") for i in range(n_gpus))
-    yield from istarmap(func_with_gpu, zip(devices, inputs), n_workers=n_tasks)
+    return imap(func, devices, iterable, n_workers=n_tasks, strict=False)
 
 
 class _StreamState(Enum):
