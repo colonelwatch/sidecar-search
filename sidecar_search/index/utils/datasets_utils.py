@@ -1,5 +1,6 @@
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator, cast
+from typing import cast
 
 import numpy as np
 import torch

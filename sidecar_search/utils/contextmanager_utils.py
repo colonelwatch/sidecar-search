@@ -1,7 +1,7 @@
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import rmtree
-from typing import Generator, Iterable
 
 
 @contextmanager

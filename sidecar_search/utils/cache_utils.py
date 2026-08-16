@@ -88,7 +88,7 @@ def clean_hf_cache(dataset: Dataset):
 
     # remove its associated lock
     for lock in HF_DATASETS_CACHE.iterdir():
-        if not lock.suffix == ".lock":
+        if lock.suffix != ".lock":
             continue
         if cache_name in str(lock):
             lock.unlink()

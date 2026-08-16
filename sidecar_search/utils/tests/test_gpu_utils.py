@@ -105,7 +105,7 @@ class TestConsumeFutures:
             _ = list(consume_futures(noop_futures(), -1))
 
     def test_empty_iterator(self) -> None:
-        futs: Iterator[Future] = iter(tuple())
+        futs: Iterator[Never] = iter(())
         assert list(consume_futures(futs, 0)) == []
 
 
@@ -131,7 +131,7 @@ class TestScheduler:
         assert mock_executor.submit.call_args_list == [call(identity, x) for x in vals]
 
     def test_empty_iterator(self) -> None:
-        vals = iter(tuple())
+        vals: Iterator[Never] = iter(())
         scheduler = Scheduler.new(lambda x: x, zip(vals), 1)
         actual = list(consume_futures(scheduler, 1))
         assert actual == []
@@ -426,9 +426,11 @@ class TestStream:
         stream = Stream(0, q, mock_cv)
         stream.finish(None)
 
-        with pytest.raises(RuntimeError, match="finished"):
-            with stream.wait_for_slot_or_cancelling() as _:
-                pass
+        with (
+            pytest.raises(RuntimeError, match="finished"),
+            stream.wait_for_slot_or_cancelling() as _,
+        ):
+            pass
 
     @pytest.mark.parametrize(("maxsize", "n_items"), [(0, 0), (1, 0), (1, 1)])
     def test_wait_for_cancelling(
@@ -587,7 +589,7 @@ class TestIqueue:
     def test_for_loop(self, items: list[int]) -> None:
         items_recv: list[int] = []
         for item in iqueue(iter(items)):
-            items_recv.append(item)
+            items_recv.append(item)  # noqa: PERF402  # explicitly tests for loop
         assert items_recv == items
 
     @pytest.mark.parametrize("n_items", [0, 1, 2])

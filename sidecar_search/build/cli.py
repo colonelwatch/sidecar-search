@@ -1,7 +1,7 @@
 import json
 import sys
+from collections.abc import Iterator, Sequence
 from itertools import batched, chain
-from typing import Iterator, Sequence
 
 import torch
 from pydantic import AliasChoices, BaseModel, Field, FilePath

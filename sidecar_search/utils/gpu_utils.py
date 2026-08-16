@@ -423,7 +423,7 @@ class iqueue[T](Iterator[T]):
                         break
                     else:
                         slot.put_result(item)
-        except BaseException as e:
+        except BaseException as e:  # noqa: BLE001  # sends thread's exc downstream
             stream.finish(e)
         else:
             stream.finish(None)

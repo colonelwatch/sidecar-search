@@ -1,7 +1,8 @@
 import sqlite3
+from collections.abc import Generator, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Generator, Iterator, Self
+from typing import Self
 
 from tqdm import tqdm
 

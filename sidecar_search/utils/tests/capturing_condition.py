@@ -1,9 +1,10 @@
 from collections import deque
+from collections.abc import Callable
 from itertools import count
 from threading import Condition, Event, Lock, RLock
 from time import monotonic
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import pytest
 

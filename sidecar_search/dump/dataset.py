@@ -39,7 +39,7 @@ def dump_dataset(
         else:
             raise ValueError(f'invalid embeddings type "{dtype}"')
     else:
-        bf16 = True if enforce == "bf16" else False
+        bf16 = enforce == "bf16"
 
     with sqlite3.connect(dest) as conn:
         conn.execute("PRAGMA page_size = 32768")
@@ -54,7 +54,7 @@ def dump_dataset(
 
             embeddings_arr = batch["embedding"]
             if not isinstance(embeddings_arr, pa.FixedSizeListArray):
-                raise ValueError('"embedding" batch was not array of FixedSizeList')
+                raise TypeError('"embedding" batch was not array of FixedSizeList')
             embeddings_np: npt.NDArray = (  # this makes the conversion zero-copy
                 embeddings_arr.flatten().to_numpy().reshape((-1, length))
             )

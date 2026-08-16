@@ -1,4 +1,4 @@
-from typing import Callable, Generator, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 
 import torch
 from sentence_transformers import SentenceTransformer

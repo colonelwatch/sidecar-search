@@ -1,7 +1,8 @@
 import sqlite3
+from collections.abc import Generator, Sequence
 from itertools import batched
 from pathlib import Path
-from typing import Generator, Literal, Sequence
+from typing import Literal
 
 import pyarrow as pa
 import torch

@@ -1,6 +1,7 @@
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, overload
+from typing import Any, overload
 
 
 @overload

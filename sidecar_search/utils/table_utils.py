@@ -1,9 +1,10 @@
 import sqlite3
 import warnings
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
-from typing import TYPE_CHECKING, Iterable, LiteralString, Mapping, assert_never
+from typing import TYPE_CHECKING, LiteralString, assert_never
 
 # this module is auto-imported by __init__ to ensure the adapters and converters
 # are registered, and a lazy PyTorch import preserves the import time floor

@@ -1,8 +1,9 @@
 import json
 import lzma
+from collections.abc import Callable
 from itertools import batched, chain, cycle, repeat
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 from unittest.mock import ANY, MagicMock, create_autospec
 
 import numpy as np
