@@ -128,13 +128,14 @@ class Scheduler[*Ts, U](Iterator[Future[U]]):
         return self._futs
 
 
-# TODO: starmap is function-first
-class imap[*Ts, U](Iterator[U]):
+class istarmap[*Ts, U](Iterator[U]):
     def __init__(
         self,
-        args_in: Iterator[tuple[*Ts]],
         func: Callable[[*Ts], U],
-        n_workers: int,
+        args_in: Iterator[tuple[*Ts]],
+        /,
+        *,
+        n_workers: int = -1,
     ) -> None:
         if n_workers < 0:
             n_workers = os.cpu_count() or 1
@@ -172,7 +173,7 @@ class imap[*Ts, U](Iterator[U]):
 
     def _get_results_iter_validate(self) -> Iterator[U]:
         if self._closed:
-            raise RuntimeError("accessed a shut down imap")
+            raise RuntimeError("accessed a shut down istarmap")
         return self._results_iter
 
 
@@ -193,7 +194,7 @@ def imap_multi_gpu[*Ts, U](
 
     n_tasks = n_gpus * tasks_per_gpu
     devices = cycle(torch.device(f"cuda:{i}") for i in range(n_gpus))
-    yield from imap(zip(devices, inputs), func_with_gpu, n_tasks)
+    yield from istarmap(func_with_gpu, zip(devices, inputs), n_workers=n_tasks)
 
 
 class _StreamState(Enum):

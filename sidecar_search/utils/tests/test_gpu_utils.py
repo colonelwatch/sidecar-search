@@ -26,9 +26,9 @@ from ..gpu_utils import (
     StreamSentinel,
     StreamSlot,
     consume_futures,
-    imap,
     imap_multi_gpu,
     iqueue,
+    istarmap,
 )
 from .capturing_condition import CapturingCondition
 
@@ -161,7 +161,7 @@ class TestScheduler:
         mock_executor.shutdown.assert_called_once_with(wait=False)
 
 
-class TestImap:
+class TestIstarmap:
     @pytest.mark.parametrize(
         ("n_workers", "expected_n_workers", "expected_n_pending"),
         [
@@ -171,7 +171,7 @@ class TestImap:
             pytest.param(2, 2, 2, id="multicore"),
         ],
     )
-    def test_imap(
+    def test_istarmap(
         self,
         n_workers: int,
         expected_n_workers: int,
@@ -189,7 +189,7 @@ class TestImap:
         def identity(x: Any) -> Any:
             return x
 
-        actual = list(imap(sentinel.args_in, identity, n_workers))
+        actual = list(istarmap(identity, sentinel.args_in, n_workers=n_workers))
 
         # transitively prove properties by proving forwarding
         patch_scheduler_new.assert_called_once_with(
@@ -211,10 +211,10 @@ class TestImap:
     )
     def test_raises_on_access_after_close(
         self,
-        close_action: Callable[[imap[*tuple[Any, ...], Any]], Any],
-        action: Callable[[imap[*tuple[Any, ...], Any]], Any],
+        close_action: Callable[[istarmap[*tuple[Any, ...], Any]], Any],
+        action: Callable[[istarmap[*tuple[Any, ...], Any]], Any],
     ) -> None:
-        items_recv_iter = imap(zip(range(10)), lambda x: x, 4)
+        items_recv_iter = istarmap(lambda x: x, zip(range(10)), n_workers=4)
         close_action(items_recv_iter)
         with pytest.raises(RuntimeError, match="shut down"):
             _ = action(items_recv_iter)
@@ -222,24 +222,26 @@ class TestImap:
     def test_exit_stack(self) -> None:
         exit_stack = PipelineExitStack()
         with exit_stack:
-            im = imap(zip(range(10)), lambda x: x, 1)
+            im = istarmap(lambda x: x, zip(range(10)), n_workers=1)
         with pytest.raises(RuntimeError, match="shut down"):
             _ = next(im)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("n_workers", [-1, 0, 1, 2])
-def test_imap_integration(n_workers: int) -> None:
-    actual = list(imap(zip(range(10)), lambda x: 2 * x, n_workers))
+def test_istarmap_integration(n_workers: int) -> None:
+    actual = list(istarmap(lambda x: 2 * x, zip(range(10)), n_workers=n_workers))
     assert actual == list(range(0, 20, 2))
 
 
 @pytest.fixture
-def mock_imap(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    mock_imap = cast(MagicMock, create_autospec(spec=imap))  # duck-typing as MagicMock
-    mock_imap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
-    monkeypatch.setattr(gpu_utils, "imap", mock_imap)
-    return mock_imap
+def mock_istarmap(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    mock_istarmap = cast(
+        MagicMock, create_autospec(spec=istarmap)
+    )  # duck-typing as MagicMock
+    mock_istarmap.side_effect = lambda *args, **kwargs: (x for x in iter([]))
+    monkeypatch.setattr(gpu_utils, "istarmap", mock_istarmap)
+    return mock_istarmap
 
 
 @pytest.mark.usefixtures("mock_gpu_env")
@@ -255,18 +257,12 @@ class TestImapMultiGpu:
         expecteds = list(zip(idxs, vals))
         assert results == expecteds
 
-    def test_tasks_arg_passed(self, mock_imap: MagicMock) -> None:
+    def test_tasks_arg_passed(self, mock_istarmap: MagicMock) -> None:
         vals = range(10)
         n_tasks_per_gpu = 2
         _ = list(imap_multi_gpu(zip(vals), (lambda _, x: x), n_tasks_per_gpu))
-
-        mock_imap.assert_called_once()
-
-        try:
-            n_tasks = mock_imap.call_args.kwargs["n_tasks"]
-        except KeyError:
-            n_tasks = mock_imap.call_args.args[2]
-
+        mock_istarmap.assert_called_once()
+        n_tasks = mock_istarmap.call_args.kwargs["n_workers"]
         assert n_tasks_per_gpu * torch.cuda.device_count() == n_tasks
 
 
