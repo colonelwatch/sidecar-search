@@ -132,14 +132,14 @@ class istarmap[R](Iterator[R]):
     def __init__[*Ts](
         self,
         func: Callable[[*Ts], R],
-        iterable: Iterator[tuple[*Ts]],
+        iterator: Iterator[tuple[*Ts]],
         /,
         *,
         n_workers: int = -1,
     ) -> None:
         if n_workers < 0:
             n_workers = os.cpu_count() or 1
-        scheduler = Scheduler.new(func, iterable, n_workers or 1)
+        scheduler = Scheduler.new(func, iterator, n_workers or 1)
         results_iter = consume_futures(scheduler, n_workers)
         self._scheduler = scheduler
         self._results_iter = results_iter
@@ -180,7 +180,7 @@ class istarmap[R](Iterator[R]):
 @overload
 def imap[T, U](
     func: Callable[[T], U],
-    iterable: Iterator[T],
+    iterator: Iterator[T],
     /,
     *,
     n_workers: int = ...,
@@ -191,7 +191,7 @@ def imap[T, U](
 @overload
 def imap[T, U, V](
     func: Callable[[T, U], V],
-    iterable: Iterator[T],
+    iterator: Iterator[T],
     iter2: Iterator[U],
     /,
     *,
@@ -203,7 +203,7 @@ def imap[T, U, V](
 @overload
 def imap[T, U, V, W](
     func: Callable[[T, U, V], W],
-    iterable: Iterator[T],
+    iterator: Iterator[T],
     iter2: Iterator[U],
     iter3: Iterator[V],
     /,
@@ -216,7 +216,7 @@ def imap[T, U, V, W](
 @overload
 def imap[R](
     func: Callable[..., R],
-    iterable: Iterator[Any],
+    iterator: Iterator[Any],
     /,
     *iters: Iterator[Any],
     n_workers: int = ...,
@@ -226,18 +226,18 @@ def imap[R](
 
 def imap[R](
     func: Callable[..., R],
-    iterable: Iterator[Any],  # at least one
+    iterator: Iterator[Any],  # at least one
     /,
     *iters: Iterator[Any],
     n_workers: int = -1,
     strict: bool = False,
 ) -> istarmap[R]:
-    return istarmap(func, zip(iterable, *iters, strict=strict), n_workers=n_workers)
+    return istarmap(func, zip(iterator, *iters, strict=strict), n_workers=n_workers)
 
 
 def imap_multi_gpu[T, U](
     func: Callable[[torch.device, T], U],
-    iterable: Iterator[T],
+    iterator: Iterator[T],
     /,
     *,
     tasks_per_gpu: int = 1,
@@ -248,7 +248,7 @@ def imap_multi_gpu[T, U](
         raise NotImplementedError("CPU-only is currently not handled")
     n_tasks = n_gpus * tasks_per_gpu
     devices = cycle(torch.device(f"cuda:{i}") for i in range(n_gpus))
-    return imap(func, devices, iterable, n_workers=n_tasks, strict=False)
+    return imap(func, devices, iterator, n_workers=n_tasks, strict=False)
 
 
 class _StreamState(Enum):
